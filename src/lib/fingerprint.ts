@@ -1,7 +1,17 @@
 /**
- * Device Fingerprint helper — lightweight custom implementation
- * that generates a stable device fingerprint from browser properties
- * WITHOUT requiring any external library (like FingerprintJS).
+ * Device Fingerprint helper for guest scan-quota tracking.
+ *
+ * The primary identifier (see getCachedFingerprint below) is now a random ID
+ * persisted in localStorage on first use — this is what's actually sent to
+ * the server as `deviceFingerprint`.
+ *
+ * getDeviceFingerprint() below (canvas/WebGL/screen/timezone/etc.) is kept
+ * only as a fallback for the rare case localStorage is unavailable. It is
+ * NOT reliably stable across separate launches of an installed PWA /
+ * home-screen shortcut — some browsers (notably iOS Safari/WebKit) add
+ * randomized per-session noise to canvas readback specifically to defeat
+ * this kind of fingerprinting, which used to make every shortcut relaunch
+ * look like a brand-new device to the server.
  *
  * This uses a combination of:
  * - Canvas fingerprint (unique per GPU/driver combination)
@@ -13,17 +23,6 @@
  * - Do-not-track setting
  * - Hardware concurrency
  * - Device memory
- *
- * The resulting fingerprint is stable across:
- * - Browser restarts
- * - PWA install / uninstall
- * - Different browser windows/tabs
- * - Incognito mode (for the same browser)
- *
- * It does NOT survive:
- * - Different browsers on the same device
- * - Clearing ALL browser data (including canvas permission)
- * - Hardware changes
  */
 
 export async function getDeviceFingerprint(): Promise<string> {
@@ -122,9 +121,68 @@ function simpleHash(str: string): string {
 // Cache the fingerprint for the session (no need to recompute every time)
 let cachedFingerprint: string | null = null;
 
-export async function getCachedFingerprint(): Promise<string> {
-  if (!cachedFingerprint) {
-    cachedFingerprint = await getDeviceFingerprint();
+const DEVICE_ID_KEY = "qarari_device_id";
+
+function generateRandomId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
   }
+  // Fallback for older browsers/WebViews without crypto.randomUUID
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
+ * A random ID generated once and persisted in localStorage — this is what
+ * actually stays stable across relaunches of an installed PWA / home-screen
+ * shortcut. Returns null only if localStorage itself is unavailable (rare:
+ * some strict-private-mode in-app browsers).
+ */
+function getOrCreatePersistedDeviceId(): string | null {
+  try {
+    const existing = localStorage.getItem(DEVICE_ID_KEY);
+    if (existing) return existing;
+    const fresh = "dev_" + generateRandomId();
+    localStorage.setItem(DEVICE_ID_KEY, fresh);
+    return fresh;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Guest device identifier sent to the server for scan-quota tracking.
+ *
+ * IMPORTANT: this now PREFERS the localStorage-persisted ID over the raw
+ * canvas/WebGL environmental fingerprint from getDeviceFingerprint(). That
+ * environmental fingerprint is NOT reliably stable between separate launches
+ * of an installed home-screen shortcut/PWA — several browsers (most notably
+ * iOS Safari/WebKit) deliberately add randomized noise to canvas readback on
+ * a per-session basis as an anti-fingerprinting measure, and a standalone
+ * app relaunch is often treated as a brand-new session. That was silently
+ * making every shortcut/app open look like a brand-new device to the
+ * server, resetting the guest's scan quota to full each time even though
+ * they hadn't actually gotten new scans.
+ *
+ * A localStorage-persisted random ID survives app relaunches (same storage,
+ * read back as-is) even though the environmental fingerprint underneath it
+ * does not, which is exactly what makes it a reliable quota key here.
+ *
+ * The old environmental fingerprint is kept only as a last-resort fallback
+ * for the rare case localStorage itself isn't available.
+ */
+export async function getCachedFingerprint(): Promise<string> {
+  if (cachedFingerprint) return cachedFingerprint;
+
+  const persisted = getOrCreatePersistedDeviceId();
+  if (persisted) {
+    cachedFingerprint = persisted;
+    return cachedFingerprint;
+  }
+
+  cachedFingerprint = await getDeviceFingerprint();
   return cachedFingerprint;
 }
