@@ -287,7 +287,17 @@ export function InputScreen() {
   // Fetch the real remaining-scans count from the server on load and whenever
   // premium status changes — never a locally-guessed number (fixes the
   // negative-counter bug: this always reflects the server's floor-at-0 value).
+  //
+  // IMPORTANT: for guests, deviceFingerprint is fetched asynchronously in a
+  // separate effect above and is still `null` on the very first render. If
+  // this effect fires before that resolves, it sends a request with no
+  // fingerprint, which makes the server fall back to the (empty) IP-based
+  // guest_usage lookup instead of the real fingerprint-based usage row —
+  // so it always reports the full quota, even after scans were used. We
+  // guard on that here and add deviceFingerprint as a dependency so the
+  // fetch re-runs (with the fingerprint included) once it's ready.
   useEffect(() => {
+    if (!session?.user && deviceFingerprint === null) return; // wait for guest fingerprint
     async function fetchRemaining() {
       try {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -311,7 +321,7 @@ export function InputScreen() {
       }
     }
     fetchRemaining();
-  }, [session, isPremium]);
+  }, [session, isPremium, deviceFingerprint]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

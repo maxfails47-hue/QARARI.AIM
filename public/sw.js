@@ -6,7 +6,7 @@
 //    always be fresh and live; caching them would produce stale or wrong
 //    financial/AI results, which is far worse than a slightly slower load.
 
-const CACHE_NAME = "qarari-shell-v1";
+const CACHE_NAME = "qarari-shell-v2";
 const APP_SHELL = ["/", "/manifest.json", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {
