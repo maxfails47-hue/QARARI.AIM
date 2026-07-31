@@ -33,19 +33,24 @@
 -- server-side in /api routes keeps working exactly as before, since it
 -- bypasses RLS entirely regardless of policies. Nothing in the app changes
 -- behavior; this only closes the direct-REST-API hole.
+--
+-- Every line uses `IF EXISTS` so this is safe to run even if you never set
+-- up an optional feature's table (e.g. skip `noon_affiliate_links` entirely
+-- if you're not using the Noon affiliate-link automation and are instead
+-- pulling prices straight from Noon's own API).
 -- ============================================================
 
-alter table public.analysis_cache        enable row level security;
-alter table public.chat_usage            enable row level security;
-alter table public.product_price_events  enable row level security;
-alter table public.device_usage_logs     enable row level security;
-alter table public.guest_device_aliases  enable row level security;
-alter table public.admin_audit_log       enable row level security;
-alter table public.guest_usage           enable row level security;
-alter table public.ai_usage_log          enable row level security;
-alter table public.cron_logs             enable row level security;
-alter table public.advisor_usage         enable row level security;
-alter table public.noon_affiliate_links  enable row level security;
+alter table if exists public.analysis_cache        enable row level security;
+alter table if exists public.chat_usage            enable row level security;
+alter table if exists public.product_price_events  enable row level security;
+alter table if exists public.device_usage_logs     enable row level security;
+alter table if exists public.guest_device_aliases  enable row level security;
+alter table if exists public.admin_audit_log       enable row level security;
+alter table if exists public.guest_usage           enable row level security;
+alter table if exists public.ai_usage_log          enable row level security;
+alter table if exists public.cron_logs             enable row level security;
+alter table if exists public.advisor_usage         enable row level security;
+alter table if exists public.noon_affiliate_links   enable row level security;
 
 -- Note: comparison_history and user_interests already had correct RLS +
 -- policies from their own migrations — nothing to change there.
