@@ -25,7 +25,7 @@ interface AppContextType {
   user: UserProfile | null;
   session: Session | null;
   authLoading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null; needsConfirmation: boolean; alreadyRegistered: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   isPremium: boolean;
@@ -205,8 +205,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [session, refreshHistory]);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
-    return { error: error?.message || null };
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) return { error: error.message, needsConfirmation: false, alreadyRegistered: false };
+
+    // Supabase returns a "success" response with no error even when the email
+    // is already registered (identities is an empty array in that case) —
+    // otherwise it would leak which emails exist. We must detect this
+    // ourselves, or the UI will lie and say "account created" for existing users.
+    const alreadyRegistered = !!data.user && (data.user.identities?.length ?? 0) === 0;
+
+    // If email confirmation is required in the Supabase project, signUp
+    // succeeds but returns no session — the user is NOT actually logged in
+    // yet. The caller must not treat this as an authenticated session.
+    const needsConfirmation = !alreadyRegistered && !data.session;
+
+    return { error: null, needsConfirmation, alreadyRegistered };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {

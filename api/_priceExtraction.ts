@@ -31,24 +31,53 @@ interface PriceHit {
   weight: number;
 }
 
+// Arabic-Indic (٠-٩) and Persian (۰-۹) digit variants are common on Egyptian
+// and Gulf retail pages and are NOT matched by \d (ASCII-only in JS regex).
+// Without this normalization, any price written in Eastern Arabic numerals
+// was silently invisible to extractPrices — this is a real, common case on
+// Arabic-language product listings, not an edge case.
+const ARABIC_INDIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+function normalizeDigits(text: string): string {
+  return text.replace(/[٠-٩۰-۹]/g, (ch) => {
+    const arabicIdx = ARABIC_INDIC_DIGITS.indexOf(ch);
+    if (arabicIdx !== -1) return String(arabicIdx);
+    const persianIdx = PERSIAN_DIGITS.indexOf(ch);
+    if (persianIdx !== -1) return String(persianIdx);
+    return ch;
+  });
+}
+
 function getTrustWeight(url: string): number {
-  const domain = new URL(url).hostname.toLowerCase();
+  let domain: string;
+  try {
+    domain = new URL(url).hostname.toLowerCase();
+  } catch {
+    // Malformed URL — don't crash the whole extraction pass over one bad link.
+    return 1;
+  }
   for (const trusted of TRUSTED_RETAILERS) {
-    if (domain.includes(trusted)) return 2;
+    // Substring match alone is spoofable (e.g. "fake-amazon-deals.com" or
+    // "amazon.evil.com" would both incorrectly get full trust). Require the
+    // trusted name to be the registrable domain label itself — either
+    // exactly "amazon.com"/"amazon.eg", or a subdomain of it like
+    // "www.amazon.com" — never just "contains the substring somewhere".
+    if (domain === trusted || domain.endsWith("." + trusted) || domain.includes("." + trusted + ".") || domain.startsWith(trusted + ".")) return 2;
   }
   return 1;
 }
 
 export function extractPrices(text: string, title: string, url: string, condition: string): PriceHit[] {
   const prices: PriceHit[] = [];
+  const normalizedText = normalizeDigits(text);
   const numRegex = /\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?/g;
   let match;
 
-  while ((match = numRegex.exec(text)) !== null) {
+  while ((match = numRegex.exec(normalizedText)) !== null) {
     const val = parseFloat(match[0].replace(/[,\s]/g, ""));
     if (val < 10 || val > 20_000_000) continue;
 
-    const window = text.slice(Math.max(0, match.index - 20), match.index + match[0].length + 20);
+    const window = normalizedText.slice(Math.max(0, match.index - 20), match.index + match[0].length + 20);
     let currency: SupportedCurrency | null = null;
     for (const p of CURRENCY_PATTERNS) {
       if (p.regex.test(window)) {

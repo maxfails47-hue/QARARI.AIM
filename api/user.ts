@@ -3,7 +3,7 @@ import { getSupabaseAdmin, getAuthedUser } from "./_supabaseAdmin.js";
 import { callAiWithFallback, classifyProductCategory, verifyPaymentScreenshot } from "./_groq_tavily.js";
 import { logAiUsage } from "./_costTracking.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep, logEnvPresence } from "./_logger.js";
-import { DEFAULT_PREMIUM_LIMITS, getAllPlans, getPlanConfig, FAIR_USE_CONFIG, getBurstLimit } from "./_planConfig.js";
+import { DEFAULT_PREMIUM_LIMITS, getAllPlans, getPlanConfig, FAIR_USE_CONFIG, getBurstLimit, FREE_TIER_LIMITS } from "./_planConfig.js";
 import { sendTelegramAlert } from "./_telegram.js";
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ import { sendTelegramAlert } from "./_telegram.js";
 //   /api/user?action=classify-icon    (new — smart product icon)
 // ---------------------------------------------------------------------------
 
-const FREE_MONTHLY_LIMIT = 3; // free tier monthly analyses
+const FREE_MONTHLY_LIMIT = FREE_TIER_LIMITS.scans; // free tier monthly analyses — single source of truth in _planConfig.ts
 // NOTE: PREMIUM_MONTHLY_LIMIT is no longer used — plan limits are now
 // read dynamically from the user's row (scans_limit_this_month) which is
 // set during admin approval based on the actual plan config.
@@ -452,6 +452,13 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
   }
   if (!screenshotUrl || typeof screenshotUrl !== "string") {
     return res.status(400).json({ error: "missing_screenshot" });
+  }
+  // The service-role client bypasses storage RLS entirely, so we must check
+  // ownership ourselves — otherwise a crafted request could point at another
+  // user's uploaded screenshot path instead of the caller's own.
+  if (!screenshotUrl.startsWith(`${user.id}/`)) {
+    console.warn("[/api/user?action=subscribe] screenshotUrl does not belong to caller:", user.id, screenshotUrl);
+    return res.status(403).json({ error: "invalid_screenshot_path" });
   }
 
   const admin = getSupabaseAdmin();

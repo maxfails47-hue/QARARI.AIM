@@ -23,28 +23,68 @@ export function LoginScreen() {
 
     // Section 10: real auth calls, wrapped, with translated error feedback —
     // never a silently non-responsive button.
-    const { error } = mode === "signup" ? await signUp(email.trim(), password) : await signIn(email.trim(), password);
+    if (mode === "login") {
+      const { error } = await signIn(email.trim(), password);
+      setLoading(false);
+      if (error) {
+        showToast(
+          lang === "ar" ? "تعذر تسجيل الدخول: تحقق من البيانات" : `Login failed: ${error}`
+        );
+        return;
+      }
+      showToast(lang === "ar" ? "تم تسجيل الدخول!" : "Logged in!");
+      if (pendingAction) {
+        pendingAction();
+        setPendingAction(null);
+      } else {
+        navigate(currentReport ? "report" : "input");
+      }
+      return;
+    }
 
+    // --- signup ---
+    const { error, needsConfirmation, alreadyRegistered } = await signUp(email.trim(), password);
     setLoading(false);
 
     if (error) {
       showToast(
-        lang === "ar"
-          ? "تعذر تسجيل الدخول: تحقق من البيانات"
-          : `Login failed: ${error}`
+        lang === "ar" ? "تعذر إنشاء الحساب: تحقق من البيانات" : `Sign up failed: ${error}`
       );
       return;
     }
 
-    showToast(
-      mode === "signup"
-        ? lang === "ar" ? "تم إنشاء الحساب! تحقق من بريدك للتأكيد إذا لزم الأمر." : "Account created! Check your email to confirm if required."
-        : lang === "ar" ? "تم تسجيل الدخول!" : "Logged in!"
-    );
+    // Supabase silently "succeeds" when the email is already registered
+    // (it never confirms/denies existence for security reasons). Detect it
+    // ourselves so we don't lie to the user with a fake success toast.
+    if (alreadyRegistered) {
+      showToast(
+        lang === "ar"
+          ? "البريد مسجل بالفعل، سجّل الدخول بدلاً من ذلك"
+          : "This email is already registered — try logging in instead"
+      );
+      setMode("login");
+      return;
+    }
 
-    // Save the display name entered at signup, if a session is available yet
-    // (it may not be, if email confirmation is required before login works).
-    if (mode === "signup" && name.trim()) {
+    // If the project requires email confirmation, there is no session yet —
+    // the user is NOT logged in, so we must not proceed as if they were
+    // (that was the bug: it always said "success" and navigated onward,
+    // even though nothing was actually saved and no session existed).
+    if (needsConfirmation) {
+      showToast(
+        lang === "ar"
+          ? "تم إنشاء الحساب! افتح بريدك واضغط رابط التأكيد لتسجيل الدخول."
+          : "Account created! Check your email and click the confirmation link to log in."
+      );
+      setMode("login");
+      return;
+    }
+
+    showToast(lang === "ar" ? "تم إنشاء الحساب وتسجيل الدخول!" : "Account created and logged in!");
+
+    // Save the display name entered at signup — a session is guaranteed to
+    // exist here since we already returned above for the no-session case.
+    if (name.trim()) {
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData.session?.user) {
         await supabase.from("users").update({ full_name: name.trim() }).eq("id", sessionData.session.user.id);

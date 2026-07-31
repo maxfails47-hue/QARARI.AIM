@@ -115,7 +115,11 @@ async function handleApprove(req: VercelRequest, res: VercelResponse) {
   updateData.chat_messages_used = 0;
   updateData.price_alerts_used = 0;
 
-  await admin.from("users").update(updateData).eq("id", reqRow.user_id);
+  const { error: updateErr } = await admin.from("users").update(updateData).eq("id", reqRow.user_id);
+  if (updateErr) {
+    console.error("[/api/admin?action=approve] failed to update user row:", updateErr);
+    return res.status(500).json({ error: "update_failed", details: updateErr.message });
+  }
 
   await admin
     .from("subscription_requests")
