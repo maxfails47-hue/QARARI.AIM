@@ -25,7 +25,7 @@ interface AppContextType {
   user: UserProfile | null;
   session: Session | null;
   authLoading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: string | null; needsConfirmation: boolean; alreadyRegistered: boolean }>;
+  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: string | null; needsConfirmation: boolean; alreadyRegistered: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   isPremium: boolean;
@@ -204,7 +204,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [session, refreshHistory]);
 
-  const signUp = useCallback(async (email: string, password: string) => {
+  const signUp = useCallback(async (email: string, password: string, fullName?: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -215,6 +215,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // confirmation link to a dead localhost address instead of back to
         // the real app. Setting it explicitly here removes that dependency.
         emailRedirectTo: window.location.origin,
+        // Stash the name in auth user_metadata so it survives the email-
+        // confirmation flow. The old approach only wrote full_name to
+        // public.users via a client-side UPDATE *after* signUp resolved —
+        // but when the project requires email confirmation, there's no
+        // session yet at that point, so the UPDATE never ran and the name
+        // was silently lost forever. Putting it here means the
+        // on_auth_user_created DB trigger can read it and set full_name at
+        // row-creation time, regardless of whether confirmation is required.
+        data: fullName ? { full_name: fullName } : undefined,
       },
     });
     if (error) return { error: error.message, needsConfirmation: false, alreadyRegistered: false };

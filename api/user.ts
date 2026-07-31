@@ -468,16 +468,21 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
   //    vision model can actually see it (the "screenshots" bucket is
   //    private — same pattern api/admin.ts already uses to show it to
   //    admins).
-  // 2. Ask the AI whether it actually looks like a payment receipt at all —
-  //    catches obviously-wrong uploads before they ever reach the admin
-  //    queue.
+  // 2. Ask the AI whether it actually looks like a payment receipt. This
+  //    used to hard-block the upload when the AI said no — but the vision
+  //    check isn't reliable enough to gate a paying customer on: a blurry
+  //    photo, an unusual bank-app layout, or a bad crop could all get a
+  //    false "not a receipt" with no way for the customer to override it.
+  //    Now it only FLAGS the request for closer manual review instead of
+  //    rejecting it outright — every upload still reaches an admin.
   // 3. Extract the printed reference number and block re-use of the exact
-  //    same real receipt across multiple requests — this is the part that
-  //    actually matters for fraud, since a genuine receipt image (even one
-  //    reused from someone else or a past payment) will always pass a pure
-  //    "is this a receipt" check.
+  //    same real receipt across multiple requests — this one stays a hard
+  //    block because it's actual evidence (a duplicate reference number),
+  //    not a guess, and a genuine receipt image will always pass it.
   let extractedReference: string | null = null;
   let extractedAmount: number | null = null;
+  let aiFlagged = false;
+  let aiFlagReason: string | null = null;
   try {
     const { data: signed } = await admin.storage.from("screenshots").createSignedUrl(screenshotUrl, 300);
     if (signed?.signedUrl) {
@@ -486,12 +491,9 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
       extractedAmount = check.amount;
 
       if (!check.looksLikeReceipt) {
-        console.warn("[/api/user?action=subscribe] AI check: not a receipt. User:", user.id);
-        return res.status(400).json({
-          error: "invalid_screenshot",
-          message:
-            "الصورة اللي رفعتها مش شكلها إيصال تحويل واضح (لازم تظهر فيها علامة نجاح العملية والمبلغ ورقم المرجع). برجاء رفع صورة/سكرين شوت واضح لتأكيد التحويل.",
-        });
+        console.warn("[/api/user?action=subscribe] AI check: not confident this is a receipt — flagging for review, not blocking. User:", user.id);
+        aiFlagged = true;
+        aiFlagReason = "AI couldn't confirm this looks like a payment receipt — needs a closer manual look.";
       }
 
       if (extractedReference) {
@@ -533,6 +535,8 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
       status: "pending_review",
       extracted_reference: extractedReference,
       extracted_amount: extractedAmount,
+      ai_flagged: aiFlagged,
+      ai_flag_reason: aiFlagReason,
     })
     .select()
     .single();
@@ -556,9 +560,10 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
     extractedAmount !== null && extractedAmount !== amount
       ? `\n⚠️ AI extracted amount (${extractedAmount} EGP) doesn't match plan price (${amount} EGP) — double-check.`
       : "";
+  const aiFlagNote = aiFlagged ? `\n🚩 AI wasn't confident this is a receipt — please look closely before approving.` : "";
 
   await sendTelegramAlert(
-    `💰 <b>New subscription request</b>\nUser: ${user.email}\nPlan: ${plan}\nAmount: ${amount} EGP\nRef #: ${extractedReference || "(not detected)"}\nScreenshot: ${screenshotUrl}${mismatchNote}`
+    `💰 <b>New subscription request</b>\nUser: ${user.email}\nPlan: ${plan}\nAmount: ${amount} EGP\nRef #: ${extractedReference || "(not detected)"}\nScreenshot: ${screenshotUrl}${mismatchNote}${aiFlagNote}`
   );
 
   return res.status(200).json({ success: true, requestId: data.id });

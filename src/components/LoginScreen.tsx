@@ -43,7 +43,7 @@ export function LoginScreen() {
     }
 
     // --- signup ---
-    const { error, needsConfirmation, alreadyRegistered } = await signUp(email.trim(), password);
+    const { error, needsConfirmation, alreadyRegistered } = await signUp(email.trim(), password, name.trim() || undefined);
     setLoading(false);
 
     if (error) {

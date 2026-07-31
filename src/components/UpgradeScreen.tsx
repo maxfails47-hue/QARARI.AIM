@@ -17,6 +17,7 @@ export function UpgradeScreen() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showExample, setShowExample] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -176,7 +177,32 @@ export function UpgradeScreen() {
             </div>
 
             <div className="space-y-3">
-              <Label className="text-sm font-medium text-zinc-300">{t("uploadScreenshot")}</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium text-zinc-300">{t("uploadScreenshot")}</Label>
+                <button
+                  type="button"
+                  onClick={() => setShowExample((v) => !v)}
+                  className="text-[11px] font-bold text-amber-400 hover:text-amber-300 underline underline-offset-2"
+                >
+                  {showExample
+                    ? (lang === "ar" ? "إخفاء المثال" : "Hide example")
+                    : (lang === "ar" ? "شايف مثال؟" : "See an example")}
+                </button>
+              </div>
+              {showExample && (
+                <div className="overflow-hidden rounded-xl border border-amber-500/20 bg-zinc-950/50">
+                  <img
+                    src="/images/instapay-receipt-example.png"
+                    alt="InstaPay receipt example"
+                    className="mx-auto max-h-64 w-auto"
+                  />
+                  <p className="p-3 text-center text-[11px] leading-relaxed text-zinc-400">
+                    {lang === "ar"
+                      ? "لازم تظهر في الصورة: علامة نجاح العملية، المبلغ، ورقم المرجع — زي المثال ده بالظبط."
+                      : "The image must show the success indicator, the amount, and the reference number — exactly like this example."}
+                  </p>
+                </div>
+              )}
               <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
               <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileSelect} className="hidden" />
               

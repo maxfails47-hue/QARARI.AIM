@@ -88,22 +88,39 @@ interface SubRequest {
   status: string;
   screenshot_signed_url: string | null;
   created_at: string;
+  ai_flagged?: boolean;
+  ai_flag_reason?: string | null;
   users: { email: string; full_name: string | null } | null;
 }
 
 function RequestsTab() {
   const [requests, setRequests] = useState<SubRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rejectReasonFor, setRejectReasonFor] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
   const load = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await adminFetch("/api/admin?action=requests");
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      // Previously any failure here (401 unauthorized, 500 server error,
+      // even a non-JSON response) fell through to `data.requests || []`
+      // and rendered exactly the same empty state as "no pending
+      // requests" — so a real backend/auth error was indistinguishable
+      // from an actually-empty queue. Surface it instead.
+      if (!res.ok || !data) {
+        setLoadError(data?.error ? `${data.error}${data.message ? `: ${data.message}` : ""}` : `HTTP ${res.status}`);
+        setRequests([]);
+        return;
+      }
       setRequests(data.requests || []);
+    } catch (e: any) {
+      setLoadError(e?.message || "network_error");
+      setRequests([]);
     } finally {
       setLoading(false);
     }
@@ -139,6 +156,17 @@ function RequestsTab() {
     return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>;
   }
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <p className="text-sm text-red-400">حصل خطأ وإحنا بنجيب الطلبات: {loadError}</p>
+        <button onClick={load} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-amber-500/40">
+          <RefreshCw className="h-3.5 w-3.5" /> حاول تاني
+        </button>
+      </div>
+    );
+  }
+
   if (!requests.length) {
     return (
       <div className="flex flex-col items-center gap-2 py-16 text-center text-zinc-500">
@@ -160,6 +188,11 @@ function RequestsTab() {
                 اشتراك شهري — {r.amount} EGP
               </p>
               <p className="text-[11px] text-zinc-600">{new Date(r.created_at).toLocaleString("ar-EG")}</p>
+              {r.ai_flagged && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-orange-400">
+                  🚩 الذكاء الاصطناعي مش متأكد إن دي صورة إيصال — راجعها كويس
+                </p>
+              )}
             </div>
             {r.screenshot_signed_url && (
               <a
@@ -231,12 +264,21 @@ function StatCard({ icon: Icon, label, value, accent }: { icon: any; label: stri
 function MetricsTab() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await adminFetch("/api/admin?action=metrics");
-      setData(await res.json());
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body) {
+        setLoadError(body?.error ? `${body.error}${body.message ? `: ${body.message}` : ""}` : `HTTP ${res.status}`);
+        return;
+      }
+      setData(body);
+    } catch (e: any) {
+      setLoadError(e?.message || "network_error");
     } finally {
       setLoading(false);
     }
@@ -246,8 +288,19 @@ function MetricsTab() {
     load();
   }, []);
 
-  if (loading || !data) {
+  if (loading) {
     return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>;
+  }
+
+  if (loadError || !data) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <p className="text-sm text-red-400">حصل خطأ وإحنا بنجيب المقاييس{loadError ? `: ${loadError}` : ""}</p>
+        <button onClick={load} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-amber-500/40">
+          <RefreshCw className="h-3.5 w-3.5" /> حاول تاني
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -281,12 +334,27 @@ function MetricsTab() {
 function CostsTab() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await adminFetch("/api/admin?action=ai-costs");
-      setData(await res.json());
+      const body = await res.json().catch(() => null);
+      // This used to blindly `setData(await res.json())` even on a 500 —
+      // so an error body like {error:"server_error"} got stored as `data`,
+      // and the render below did `data.dailyTrend.map(...)` on a field
+      // that error body never has, crashing the whole tab with "Cannot
+      // read properties of undefined (reading 'map')". Catch it here
+      // instead and show the actual error.
+      if (!res.ok || !body) {
+        setLoadError(body?.error ? `${body.error}${body.message ? `: ${body.message}` : ""}` : `HTTP ${res.status}`);
+        return;
+      }
+      setData(body);
+    } catch (e: any) {
+      setLoadError(e?.message || "network_error");
     } finally {
       setLoading(false);
     }
@@ -296,11 +364,25 @@ function CostsTab() {
     load();
   }, []);
 
-  if (loading || !data) {
+  if (loading) {
     return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>;
   }
 
-  const maxDay = Math.max(1, ...data.dailyTrend.map((d: any) => d.cost));
+  if (loadError || !data) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <p className="text-sm text-red-400">حصل خطأ وإحنا بنجيب تكلفة الذكاء الاصطناعي{loadError ? `: ${loadError}` : ""}</p>
+        <button onClick={load} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-amber-500/40">
+          <RefreshCw className="h-3.5 w-3.5" /> حاول تاني
+        </button>
+      </div>
+    );
+  }
+
+  const dailyTrend = data.dailyTrend || [];
+  const byModel = data.byModel || {};
+  const byEndpoint = data.byEndpoint || {};
+  const maxDay = Math.max(1, ...dailyTrend.map((d: any) => d.cost));
 
   return (
     <div className="space-y-4">
@@ -321,7 +403,7 @@ function CostsTab() {
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
         <p className="mb-3 text-xs font-bold text-zinc-400">التكلفة اليومية — آخر 14 يوم</p>
         <div className="flex h-32 items-end gap-1">
-          {data.dailyTrend.map((d: any) => (
+          {dailyTrend.map((d: any) => (
             <div key={d.date} className="group relative flex-1">
               <div
                 className="w-full rounded-t bg-amber-500/50 transition-colors group-hover:bg-amber-400"
@@ -339,7 +421,7 @@ function CostsTab() {
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
         <p className="mb-3 text-xs font-bold text-zinc-400">حسب الموديل</p>
         <div className="space-y-2">
-          {Object.entries(data.byModel).map(([model, v]: any) => (
+          {Object.entries(byModel).map(([model, v]: any) => (
             <div key={model} className="flex items-center justify-between text-xs">
               <span className="text-zinc-300">{model}</span>
               <span className="text-zinc-500">{v.calls} طلب — ${v.cost.toFixed(4)}</span>
@@ -352,7 +434,7 @@ function CostsTab() {
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
         <p className="mb-3 text-xs font-bold text-zinc-400">حسب نوع الطلب</p>
         <div className="space-y-2">
-          {Object.entries(data.byEndpoint).map(([ep, v]: any) => (
+          {Object.entries(byEndpoint).map(([ep, v]: any) => (
             <div key={ep} className="flex items-center justify-between text-xs">
               <span className="text-zinc-300">{ep}</span>
               <span className="text-zinc-500">{v.calls} طلب — ${v.cost.toFixed(4)}</span>
