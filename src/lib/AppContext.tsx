@@ -205,7 +205,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [session, refreshHistory]);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        // Without this, Supabase falls back to the project's "Site URL"
+        // (Authentication → URL Configuration in the dashboard) — which is
+        // often still left as the localhost default. That sends the
+        // confirmation link to a dead localhost address instead of back to
+        // the real app. Setting it explicitly here removes that dependency.
+        emailRedirectTo: window.location.origin,
+      },
+    });
     if (error) return { error: error.message, needsConfirmation: false, alreadyRegistered: false };
 
     // Supabase returns a "success" response with no error even when the email
