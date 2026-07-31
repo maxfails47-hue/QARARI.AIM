@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabaseAdmin, getAuthedUser } from "./_supabaseAdmin.js";
-import { callAiWithFallback, classifyProductCategory } from "./_groq_tavily.js";
+import { callAiWithFallback, classifyProductCategory, verifyPaymentScreenshot } from "./_groq_tavily.js";
 import { logAiUsage } from "./_costTracking.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep, logEnvPresence } from "./_logger.js";
 import { DEFAULT_PREMIUM_LIMITS, getAllPlans, getPlanConfig, FAIR_USE_CONFIG, getBurstLimit } from "./_planConfig.js";
@@ -456,6 +456,66 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
 
   const admin = getSupabaseAdmin();
 
+  // ---- Fraud-reduction pre-check (never a replacement for manual review) ----
+  // 1. Get a short-lived signed URL for the just-uploaded screenshot so the
+  //    vision model can actually see it (the "screenshots" bucket is
+  //    private — same pattern api/admin.ts already uses to show it to
+  //    admins).
+  // 2. Ask the AI whether it actually looks like a payment receipt at all —
+  //    catches obviously-wrong uploads before they ever reach the admin
+  //    queue.
+  // 3. Extract the printed reference number and block re-use of the exact
+  //    same real receipt across multiple requests — this is the part that
+  //    actually matters for fraud, since a genuine receipt image (even one
+  //    reused from someone else or a past payment) will always pass a pure
+  //    "is this a receipt" check.
+  let extractedReference: string | null = null;
+  let extractedAmount: number | null = null;
+  try {
+    const { data: signed } = await admin.storage.from("screenshots").createSignedUrl(screenshotUrl, 300);
+    if (signed?.signedUrl) {
+      const check = await verifyPaymentScreenshot(signed.signedUrl);
+      extractedReference = check.referenceNumber;
+      extractedAmount = check.amount;
+
+      if (!check.looksLikeReceipt) {
+        console.warn("[/api/user?action=subscribe] AI check: not a receipt. User:", user.id);
+        return res.status(400).json({
+          error: "invalid_screenshot",
+          message:
+            "الصورة اللي رفعتها مش شكلها إيصال تحويل واضح (لازم تظهر فيها علامة نجاح العملية والمبلغ ورقم المرجع). برجاء رفع صورة/سكرين شوت واضح لتأكيد التحويل.",
+        });
+      }
+
+      if (extractedReference) {
+        const { data: dup } = await admin
+          .from("subscription_requests")
+          .select("id, user_id")
+          .eq("extracted_reference", extractedReference)
+          .limit(1)
+          .maybeSingle();
+        if (dup) {
+          console.warn(
+            "[/api/user?action=subscribe] Duplicate reference number:",
+            extractedReference,
+            "| new user:",
+            user.id,
+            "| original request user:",
+            dup.user_id
+          );
+          return res.status(409).json({
+            error: "duplicate_receipt",
+            message: "رقم المرجع في الإيصال ده اتسجل قبل كده مع طلب اشتراك تاني. لو الإيصال ده جديد فعلاً تواصل معانا مباشرة.",
+          });
+        }
+      }
+    }
+  } catch (checkErr) {
+    // Never block a legitimate subscriber over an AI-check failure — just
+    // log it and fall through to the normal manual-review flow.
+    console.error("[/api/user?action=subscribe] Screenshot pre-check failed (continuing):", (checkErr as any)?.message);
+  }
+
   const { data, error } = await admin
     .from("subscription_requests")
     .insert({
@@ -464,17 +524,34 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
       amount,
       screenshot_url: screenshotUrl,
       status: "pending_review",
+      extracted_reference: extractedReference,
+      extracted_amount: extractedAmount,
     })
     .select()
     .single();
 
   if (error || !data) {
+    // Postgres unique_violation — the DB-level index (see
+    // supabase-subscription-fraud-check-migration.sql) caught a duplicate
+    // reference number that raced past the app-level check above.
+    if ((error as any)?.code === "23505") {
+      console.warn("[/api/user?action=subscribe] Duplicate reference caught at DB level. User:", user.id);
+      return res.status(409).json({
+        error: "duplicate_receipt",
+        message: "رقم المرجع في الإيصال ده اتسجل قبل كده مع طلب اشتراك تاني. لو الإيصال ده جديد فعلاً تواصل معانا مباشرة.",
+      });
+    }
     console.error("[/api/user?action=subscribe] insert failed:", error);
     return res.status(500).json({ error: "server_error" });
   }
 
+  const mismatchNote =
+    extractedAmount !== null && extractedAmount !== amount
+      ? `\n⚠️ AI extracted amount (${extractedAmount} EGP) doesn't match plan price (${amount} EGP) — double-check.`
+      : "";
+
   await sendTelegramAlert(
-    `💰 <b>New subscription request</b>\nUser: ${user.email}\nPlan: ${plan}\nAmount: ${amount} EGP\nScreenshot: ${screenshotUrl}`
+    `💰 <b>New subscription request</b>\nUser: ${user.email}\nPlan: ${plan}\nAmount: ${amount} EGP\nRef #: ${extractedReference || "(not detected)"}\nScreenshot: ${screenshotUrl}${mismatchNote}`
   );
 
   return res.status(200).json({ success: true, requestId: data.id });

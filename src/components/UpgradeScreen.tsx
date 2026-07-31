@@ -63,7 +63,17 @@ export function UpgradeScreen() {
         body: JSON.stringify({ plan: selectedPlan?.id, screenshotUrl: path }),
       });
 
-      if (!res.ok) throw new Error("subscribe_failed");
+      if (!res.ok) {
+        // invalid_screenshot / duplicate_receipt come back with a ready-made
+        // Arabic message from the server — show it directly so the person
+        // knows exactly what to fix instead of a generic error.
+        const errBody = await res.json().catch(() => null);
+        if (errBody?.error === "invalid_screenshot" || errBody?.error === "duplicate_receipt") {
+          showToast(errBody.message || (lang === "ar" ? "حدث خطأ في الصورة المرفوعة" : "There was a problem with the uploaded image"));
+          return;
+        }
+        throw new Error("subscribe_failed");
+      }
 
       setSubmitted(true);
       showToast(t("paymentSuccess"));

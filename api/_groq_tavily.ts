@@ -279,6 +279,96 @@ async function smartAdaptiveSearch(product: string, currency: string, region: { 
   return { results: state.allResults, searchCount: state.searchCount, retailerSearchResults };
 }
 
+// Vision-capable model on Groq, used ONLY for the payment-screenshot
+// pre-check below. Separate from PRIMARY_MODEL/FALLBACK_MODEL (which are
+// text-only) because it needs to accept an image_url content part.
+// NOTE: verify this model id is still current on your Groq account/plan —
+// Groq's vision model lineup changes; swap this string if the call starts
+// failing with a model-not-found error.
+const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+
+export interface ScreenshotCheckResult {
+  looksLikeReceipt: boolean;
+  referenceNumber: string | null;
+  amount: number | null;
+  note: string;
+}
+
+/**
+ * Fraud-reduction pre-check for subscription payment screenshots.
+ *
+ * This is NOT a replacement for manual review — it's a first filter that:
+ * 1. Rejects obviously-wrong uploads (random photos, unrelated screenshots)
+ *    before they ever hit the admin queue.
+ * 2. Extracts the transaction reference number so the caller (handleSubscribe
+ *    in api/user.ts) can block re-use of the exact same real receipt across
+ *    multiple accounts — the part that actually stops fraud, since a
+ *    genuine-looking receipt image will always pass a pure "is this a
+ *    receipt" check.
+ *
+ * Fails OPEN on any error (network issue, model unavailable, bad JSON):
+ * returns looksLikeReceipt: true with nulls, so a temporary AI outage never
+ * blocks legitimate subscribers — it just falls back to pure manual review,
+ * same as before this feature existed.
+ */
+export async function verifyPaymentScreenshot(imageUrl: string): Promise<ScreenshotCheckResult> {
+  const apiKey = process.env.GROQ_API_KEY;
+  const fallback: ScreenshotCheckResult = {
+    looksLikeReceipt: true,
+    referenceNumber: null,
+    amount: null,
+    note: "ai_check_skipped",
+  };
+  if (!apiKey) return fallback;
+
+  try {
+    const res = await loggedFetch("groq.vision.receipt-check", "https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: VISION_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "You are checking an uploaded image for a payment-app subscription flow (Egyptian mobile wallets: InstaPay, Vodafone Cash, Fawry, bank transfer apps, etc). " +
+                  "Look ONLY at what's visibly printed on the image. Return strict JSON with exactly these keys: " +
+                  '{"looksLikeReceipt": boolean, "referenceNumber": string|null, "amount": number|null}. ' +
+                  "looksLikeReceipt = true only if the image is clearly a payment/transfer confirmation screen (has a success indicator, a transferred amount, and typically a reference/transaction number). " +
+                  "referenceNumber = the transaction/reference number exactly as printed (digits, no spaces), or null if none visible. " +
+                  "amount = the numeric transferred amount, or null if unclear. Do not guess — if unsure, use null / false.",
+              },
+              { type: "image_url", image_url: { url: imageUrl } },
+            ],
+          },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      console.error("[verifyPaymentScreenshot] Groq vision error:", res.status);
+      return fallback;
+    }
+    const json = await res.json();
+    const content = json?.choices?.[0]?.message?.content;
+    if (!content) return fallback;
+    const parsed = loggedJsonParse("verifyPaymentScreenshot", content);
+    return {
+      looksLikeReceipt: parsed?.looksLikeReceipt !== false, // fail open on ambiguous parse
+      referenceNumber: typeof parsed?.referenceNumber === "string" ? parsed.referenceNumber.trim() || null : null,
+      amount: typeof parsed?.amount === "number" ? parsed.amount : null,
+      note: "ai_check_ran",
+    };
+  } catch (err) {
+    console.error("[verifyPaymentScreenshot] threw:", (err as any)?.message);
+    return fallback;
+  }
+}
+
 async function callGroqModel(model: string, system: string, user: string) {
   const apiKey = process.env.GROQ_API_KEY;
   const res = await loggedFetch("groq.chat", "https://api.groq.com/openai/v1/chat/completions", {
