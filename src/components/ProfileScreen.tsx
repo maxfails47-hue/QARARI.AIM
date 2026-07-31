@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 
 export function ProfileScreen() {
-  const { t, lang, dir, user, signOut, navigate, isPremium, session } = useApp();
+  const { t, lang, dir, user, signOut, navigate, isPremium, session, authLoading } = useApp();
   const [scansUsed, setScansUsed] = useState(0);
   const [scansMax, setScansMax] = useState(FREE_MONTHLY_LIMIT);
   const [copied, setCopied] = useState(false);
@@ -31,9 +31,30 @@ export function ProfileScreen() {
     fetchUsage();
   }, [session, isPremium]);
 
-  if (!user) {
-    navigate("login");
-    return null;
+  // Redirect to login only once we actually KNOW there's no session — never
+  // during the brief moment right after login where `session` is already
+  // set but the `user` profile row is still being fetched. Checking `user`
+  // here (instead of `session`) was the bug: it bounced a freshly-logged-in
+  // person straight back to the login screen because their profile hadn't
+  // loaded yet, even though they were properly authenticated. This also has
+  // to run in an effect, not during render, so it never fires on a stale
+  // value mid-render.
+  useEffect(() => {
+    if (!authLoading && !session?.user) {
+      navigate("login");
+    }
+  }, [authLoading, session, navigate]);
+
+  if (authLoading || (session?.user && !user)) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-md items-center justify-center px-4 py-6">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!session?.user) {
+    return null; // the effect above is already redirecting to login
   }
 
   const handleLogout = async () => {
