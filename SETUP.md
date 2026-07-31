@@ -41,6 +41,7 @@ Go to your Vercel project → Settings → Environment Variables, and add:
 ```
 GROQ_API_KEY=your_groq_key
 TAVILY_API_KEY=your_tavily_key
+SERPER_API_KEY=your_serper_key
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 VITE_SUPABASE_URL=https://your-project.supabase.co
@@ -56,6 +57,8 @@ SHOW_BTECH_COMPARISON=false
 ```
 
 `SHOW_BTECH_COMPARISON` (optional, defaults to off) controls whether B.TECH appears as a card in the retailer price comparison on the report screen. Leave it `false`/unset until a B.TECH affiliate deal is confirmed, then set it to `true`.
+
+`SERPER_API_KEY` is required, not optional: the price-fetching pipeline tries Groq Compound first, and automatically falls back to Serper + Groq's `gpt-oss-120b` whenever Compound errors out (this happens more than you'd expect on the Free Tier due to its internal search-tool response-size limit). If this key is missing, every request that hits that fallback path throws instead of degrading gracefully — which shows up as inaccurate or missing market prices. Get a key at serper.dev (free tier available).
 
 `VITE_ADMIN_ROUTE_SLUG` is optional but recommended: it moves the Admin Dashboard from the guessable `/admin` to a secret path of your choosing (e.g. `/qarari-2511k26x`). It must have the `VITE_` prefix (unlike the other admin vars) because the router needs to read it in the browser to know which path to render the dashboard on. If you don't set it, the dashboard falls back to `/admin`.
 

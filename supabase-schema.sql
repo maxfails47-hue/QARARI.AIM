@@ -89,6 +89,7 @@ create table if not exists public.guest_usage (
   updated_at timestamptz not null default now()
 );
 -- No RLS needed here — this table is only ever touched by the backend
+-- UPDATE: this was wrong — see supabase-lockdown-backend-only-tables-migration.sql
 -- (service role key), never queried directly from the browser.
 
 -- 7. AI USAGE LOG (Section 25 — AI Cost Dashboard). One row per real Groq

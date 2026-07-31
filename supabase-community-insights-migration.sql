@@ -21,6 +21,7 @@ create index if not exists product_price_events_cache_key_idx
   on public.product_price_events (cache_key, created_at desc);
 
 -- No RLS needed: only ever written/read by the backend (Service Role Key).
+-- UPDATE: this was wrong — see supabase-lockdown-backend-only-tables-migration.sql
 -- No user identifiers are stored — this table is anonymous by design, since
 -- it exists purely to compute an aggregate count/price range, never to
 -- expose who submitted what.

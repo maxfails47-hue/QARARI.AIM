@@ -110,3 +110,22 @@
 ### مطلوب منك بعد الرفع:
 1. شغّل ملف `supabase-watchlist-delete-policy-migration.sql` في Supabase SQL editor.
 2. تأكد إن متغيرات البيئة (`GROQ_API_KEY` إلخ) موجودة في Vercel — نفس الموجودة قبل كده، مفيش جديد.
+
+---
+
+## مراجعة ما قبل الإطلاق (Pre-Launch Review) — الجلسة الحالية
+
+### 1. 🔴 ثغرة أمنية حرجة: جداول بدون RLS خالص
+عدد من الجداول اتعملت في migrations سابقة بتعليق "No RLS needed — backend only"، وده افتراض غلط: أي مشروع Supabase بيبعت الـ `anon key` العام جوه كود المتصفح، وطالما RLS مقفول، أي حد يقدر يكلم REST API بتاع Supabase مباشرة (من غير ما يعدي على التطبيق خالص) ويقرا/يعدّل الجدول ده. الجداول المتأثرة:
+`analysis_cache`, `chat_usage`, `product_price_events`, `device_usage_logs`, `guest_device_aliases`, `admin_audit_log`, `guest_usage`, `ai_usage_log`, `cron_logs`, `advisor_usage`, `noon_affiliate_links`
+
+أخطر تأثير: أي حد كان يقدر يصفّر الـ quota بتاعه في `device_usage_logs`/`guest_usage` مباشرة، وده بالظبط اللي نظام الـ device fingerprint اتعمل عشان يمنعه.
+
+**الحل:** ملف جديد `supabase-lockdown-backend-only-tables-migration.sql` — بيفعّل RLS من غير أي policies (يعني منع تام لأي حد غير الـ service role key). **لازم يتشغل قبل الإطلاق.**
+
+### 2. متغير بيئة ناقص من التوثيق: `SERPER_API_KEY`
+كان مستخدم فعليًا في `api/_groq_tavily.ts` كـ fallback لما Groq Compound يفشل، لكن مكانش موجود في `SETUP.md` — يعني ممكن حد ينساه وقت الرفع على Vercel، والـ fallback هيفشل صامت، وده سبب محتمل لمشكلة "عدم دقة السعر" المذكورة. تم توثيقه دلوقتي في `SETUP.md`.
+
+### مطلوب منك بعد الرفع (إضافة على القايمة اللي فوق):
+3. شغّل `supabase-lockdown-backend-only-tables-migration.sql` في Supabase SQL Editor.
+4. تأكد إن `SERPER_API_KEY` موجود في Environment Variables على Vercel.

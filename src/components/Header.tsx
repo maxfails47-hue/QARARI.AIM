@@ -1,10 +1,29 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { Globe, History, User, Sparkles, Plus, GitCompare, HelpCircle, Bot, Zap, Bell, GitCompareArrows } from "lucide-react";
+import { Globe, History, User, Sparkles, Plus, GitCompare, Bell, GitCompareArrows, MoreVertical } from "lucide-react";
 import { HeaderInstallButton } from "@/components/HeaderInstallButton";
 
 export function Header() {
   const { lang, setLang, t, navigate, screen, isPremium, user } = useApp();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close the "More" dropdown on outside click or Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [menuOpen]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-amber-500/20 bg-[#0B0B0F]/95 backdrop-blur-md">
@@ -23,8 +42,6 @@ export function Header() {
         </button>
 
         <div className="flex items-center gap-1.5">
-          <HeaderInstallButton />
-
           <button
             onClick={() => navigate("input")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
@@ -52,28 +69,6 @@ export function Header() {
           >
             <History className="h-5 w-5" />
           </button>
-          {isPremium && (
-            <button
-              onClick={() => navigate("comparisonHistory")}
-              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                screen === "comparisonHistory" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
-              }`}
-              title={lang === "ar" ? "سجل المقارنات" : "Comparison History"}
-            >
-              <GitCompareArrows className="h-5 w-5" />
-            </button>
-          )}
-          {user && (
-            <button
-              onClick={() => navigate("watchlist")}
-              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                screen === "watchlist" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
-              }`}
-              title={t("watchlistTitle")}
-            >
-              <Bell className="h-5 w-5" />
-            </button>
-          )}
           <button
             onClick={() => navigate(user ? "profile" : "login")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
@@ -83,14 +78,75 @@ export function Header() {
           >
             <User className="h-5 w-5" />
           </button>
-          <button
-            onClick={() => setLang(lang === "ar" ? "en" : "ar")}
-            className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-zinc-400 transition-colors hover:bg-zinc-800/50 hover:text-amber-400"
-            title={lang === "ar" ? "English" : "العربية"}
-          >
-            <Globe className="h-4 w-4" />
-            <span className="text-xs font-bold">{lang === "ar" ? "EN" : "ع"}</span>
-          </button>
+
+          {/* Everything occasional/secondary lives behind this single "More"
+              button instead of each getting its own permanent header icon —
+              install prompt, premium comparison history, watchlist, language. */}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                menuOpen || screen === "watchlist" || screen === "comparisonHistory"
+                  ? "bg-amber-500/15 text-amber-400"
+                  : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
+              }`}
+              title={t("moreMenu")}
+              aria-label={t("moreMenu")}
+              aria-expanded={menuOpen}
+            >
+              <MoreVertical className="h-5 w-5" />
+            </button>
+
+            {menuOpen && (
+              <div className="absolute top-11 z-50 w-52 rounded-xl border border-zinc-800 bg-zinc-900 p-1.5 shadow-2xl ltr:right-0 rtl:left-0">
+                {user && (
+                  <button
+                    onClick={() => {
+                      navigate("watchlist");
+                      setMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm transition-colors hover:bg-zinc-800/70 ${
+                      screen === "watchlist" ? "text-amber-400" : "text-zinc-200"
+                    }`}
+                  >
+                    <Bell className="h-4 w-4 shrink-0" />
+                    {t("watchlistTitle")}
+                  </button>
+                )}
+                {isPremium && (
+                  <button
+                    onClick={() => {
+                      navigate("comparisonHistory");
+                      setMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm transition-colors hover:bg-zinc-800/70 ${
+                      screen === "comparisonHistory" ? "text-amber-400" : "text-zinc-200"
+                    }`}
+                  >
+                    <GitCompareArrows className="h-4 w-4 shrink-0" />
+                    {t("comparisonHistory")}
+                  </button>
+                )}
+
+                {(user || isPremium) && <div className="my-1 h-px bg-zinc-800" />}
+
+                <HeaderInstallButton variant="menuItem" onAfterClick={() => setMenuOpen(false)} />
+
+                <div className="my-1 h-px bg-zinc-800" />
+
+                <button
+                  onClick={() => {
+                    setLang(lang === "ar" ? "en" : "ar");
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm text-zinc-200 transition-colors hover:bg-zinc-800/70"
+                >
+                  <Globe className="h-4 w-4 shrink-0" />
+                  {lang === "ar" ? "English" : "العربية"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>

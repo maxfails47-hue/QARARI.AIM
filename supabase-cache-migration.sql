@@ -15,4 +15,5 @@ create table if not exists public.analysis_cache (
 );
 
 -- No RLS needed: this table is only ever touched by the backend
+-- UPDATE: this was wrong — see supabase-lockdown-backend-only-tables-migration.sql
 -- (Service Role Key), never directly by client-side anon/authenticated keys.

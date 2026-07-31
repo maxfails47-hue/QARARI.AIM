@@ -18,7 +18,13 @@ import {
 
 const SEEN_KEY = "qarari-header-install-badge-seen";
 
-export function HeaderInstallButton() {
+export function HeaderInstallButton({
+  variant = "badge",
+  onAfterClick,
+}: {
+  variant?: "badge" | "menuItem";
+  onAfterClick?: () => void;
+}) {
   const { t, dir } = useApp();
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [iosEligible, setIosEligible] = useState(false);
@@ -65,6 +71,7 @@ export function HeaderInstallButton() {
       if (outcome === "accepted") setInstalled(true);
       clearDeferredPrompt();
       setDeferredPrompt(null);
+      onAfterClick?.();
       return;
     }
 
@@ -79,6 +86,37 @@ export function HeaderInstallButton() {
   // standalone — it no longer hides itself while waiting on Chrome's
   // `beforeinstallprompt` event.
   if (installed || isStandalone()) return null;
+
+  // ─── Menu-item variant ───
+  // Renders as a full-width row (icon + label) to sit inside the header's
+  // "More" dropdown instead of as its own floating badge in the header bar.
+  // This keeps the header itself from getting crowded while still always
+  // offering a way to install the app.
+  if (variant === "menuItem") {
+    return (
+      <div>
+        <button
+          onClick={handleClick}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm text-zinc-200 transition-colors hover:bg-zinc-800/70"
+        >
+          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-[#0B0B0F]">
+            <Download className="h-4 w-4" strokeWidth={2.5} />
+            {showDot && (
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-zinc-900" />
+            )}
+          </span>
+          {t("installApp")}
+        </button>
+        {showTooltip && (
+          <p dir={dir} className="px-3 pb-2 text-[11px] leading-snug text-zinc-500">
+            {iosEligible
+              ? `${t("installIosStep1")} — ${t("installIosStep2")}`
+              : t("installManualHint")}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="relative">

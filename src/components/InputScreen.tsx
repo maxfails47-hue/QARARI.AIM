@@ -46,9 +46,11 @@ export function InputScreen() {
   const productVoiceRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // ─── Voice Input for Product Name & Price ───
-  // Uses Web Speech API to capture product name + price from voice command.
-  // Example: "آيفون 15 برو سعره 35000" → product="آيفون 15 برو", price="35000"
+  // ─── Voice Input for Product Name ───
+  // Uses Web Speech API to capture the product name ONLY from voice.
+  // The full transcript (e.g. "آيفون 15 برو ماكس") is placed entirely in the
+  // product name field — numbers like "15" are part of the product name here,
+  // not a price, so we no longer try to split out a price from this input.
   const toggleProductVoiceInput = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
@@ -70,53 +72,13 @@ export function InputScreen() {
       const transcript = e.results[0][0].transcript.trim();
       console.log("[Voice Input] Raw transcript:", transcript);
 
-      // Smart parsing: extract product name and price from natural speech
-      // Pattern 1: "ProductName priceNumber" or "ProductName سعره Number"
-      const pricePatterns = [
-        /(?:سعره|سعرها|بسعر|الثمن|price\s*(?:is|of)?\s*|for\s*\$?|\b\$?)(\d+[,.]?\d*)/i,
-        /(\d+[,.]?\d*)\s*(?:جنيه|دولار|ريال|euro|pound|\$|usd|sar|egp)/i,
-        /(?:جنيه|دولار|ريال)\s*(\d+[,.]?\d*)/i,
-      ];
-
-      let extractedPrice: string | null = null;
-      let extractedProduct: string = transcript;
-
-      for (const pattern of pricePatterns) {
-        const match = transcript.match(pattern);
-        if (match) {
-          extractedPrice = match[1].replace(/[,]/g, "");
-          // Remove the price portion from the transcript to get the product name
-          extractedProduct = transcript.replace(match[0], "").trim();
-          // Clean up trailing/leading connectors
-          extractedProduct = extractedProduct.replace(/\s+(و|و|and|is|of|for)\s*$/i, "").trim();
-          break;
-        }
+      // The entire transcript is the product name — no price extraction.
+      if (transcript) {
+        setProduct((prev) => (prev ? prev + " " : "") + transcript);
       }
 
-      // If no explicit price pattern matched, try to find any number at the end
-      if (!extractedPrice) {
-        const numberMatch = transcript.match(/(\d+[,.]?\d*)\s*$/);
-        if (numberMatch) {
-          extractedPrice = numberMatch[1].replace(/[,]/g, "");
-          extractedProduct = transcript.replace(numberMatch[0], "").trim();
-          extractedProduct = extractedProduct.replace(/\s+(و|و|and|is|of|for)\s*$/i, "").trim();
-        }
-      }
-
-      // Apply extracted values
-      if (extractedProduct) {
-        setProduct((prev) => (prev ? prev + " " : "") + extractedProduct);
-      }
-      if (extractedPrice) {
-        setPrice(extractedPrice);
-      }
-
-      console.log("[Voice Input] Parsed → product:", extractedProduct, "| price:", extractedPrice);
-      showToast(
-        lang === "ar"
-          ? (extractedProduct ? "تم إدخال اسم المنتج" : "") + (extractedPrice ? ` والسعر: ${extractedPrice}` : "")
-          : (extractedProduct ? "Product name added" : "") + (extractedPrice ? ` & price: ${extractedPrice}` : "")
-      );
+      console.log("[Voice Input] Product name set to:", transcript);
+      showToast(lang === "ar" ? "تم إدخال اسم المنتج" : "Product name added");
     };
 
     rec.onend = () => setProductVoiceListening(false);
