@@ -186,13 +186,13 @@ export function UpgradeScreen() {
                 >
                   {showExample
                     ? (lang === "ar" ? "إخفاء المثال" : "Hide example")
-                    : (lang === "ar" ? "شايف مثال؟" : "See an example")}
+                    : (lang === "ar" ? "شوف مثال؟" : "See an example")}
                 </button>
               </div>
               {showExample && (
                 <div className="overflow-hidden rounded-xl border border-amber-500/20 bg-zinc-950/50">
                   <img
-                    src="/images/instapay-receipt-example.png"
+                    src="/images/instapay-receipt-example.jpg"
                     alt="InstaPay receipt example"
                     className="mx-auto max-h-64 w-auto"
                   />

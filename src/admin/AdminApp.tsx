@@ -10,7 +10,7 @@ type Tab = "requests" | "metrics" | "costs";
 // ---------------------------------------------------------------------------
 // Login
 // ---------------------------------------------------------------------------
-function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
+function AdminLogin({ onSuccess, expiredNotice }: { onSuccess: () => void; expiredNotice?: boolean }) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -52,6 +52,11 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
         </div>
 
         <div className="space-y-3">
+          {expiredNotice && (
+            <p className="rounded-lg bg-orange-500/10 px-3 py-2 text-center text-xs text-orange-400 ring-1 ring-orange-500/20">
+              انتهت صلاحية الجلسة (كلمة المرور المحفوظة بقت مش صحيحة) — سجّل دخول تاني
+            </p>
+          )}
           <input
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -454,9 +459,24 @@ function CostsTab() {
 export default function AdminApp() {
   const [authed, setAuthed] = useState(() => !!getStoredCreds());
   const [tab, setTab] = useState<Tab>("requests");
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setAuthed(false);
+      setSessionExpired(true);
+    };
+    window.addEventListener("admin-unauthorized", onUnauthorized);
+    return () => window.removeEventListener("admin-unauthorized", onUnauthorized);
+  }, []);
 
   if (!authed) {
-    return <AdminLogin onSuccess={() => setAuthed(true)} />;
+    return (
+      <AdminLogin
+        onSuccess={() => { setAuthed(true); setSessionExpired(false); }}
+        expiredNotice={sessionExpired}
+      />
+    );
   }
 
   const tabs: { id: Tab; label: string; icon: any }[] = [

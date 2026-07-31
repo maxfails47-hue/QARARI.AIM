@@ -24,12 +24,18 @@ export function clearCreds() {
 }
 
 // Every admin API call re-sends the username/password as headers (Section 15's
-// simple single-admin gate) — a 401 here always means "log in again".
+// simple single-admin gate) — a 401 here always means "log in again", most
+// often because the stored password in this browser tab's sessionStorage no
+// longer matches ADMIN_PASSWORD on the server (e.g. it was rotated, or these
+// are leftover creds from an earlier, since-invalidated login). Previously
+// this surfaced only as "unauthorized" inside whichever tab happened to be
+// open, with no obvious next step — now we clear the stale creds and tell
+// the shell to drop back to the login screen automatically.
 export async function adminFetch(path: string, options: RequestInit = {}): Promise<Response> {
   const creds = getStoredCreds();
   if (!creds) throw new Error("not_authenticated");
 
-  return fetch(path, {
+  const res = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -38,4 +44,11 @@ export async function adminFetch(path: string, options: RequestInit = {}): Promi
       ...(options.headers || {}),
     },
   });
+
+  if (res.status === 401) {
+    clearCreds();
+    window.dispatchEvent(new Event("admin-unauthorized"));
+  }
+
+  return res;
 }
