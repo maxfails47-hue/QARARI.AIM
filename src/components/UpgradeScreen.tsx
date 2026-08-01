@@ -65,12 +65,12 @@ export function UpgradeScreen() {
       });
 
       if (!res.ok) {
-        // invalid_screenshot / duplicate_receipt come back with a ready-made
+        // invalid_screenshot / duplicate_receipt / already_subscribed come back with a ready-made
         // Arabic message from the server — show it directly so the person
         // knows exactly what to fix instead of a generic error.
         const errBody = await res.json().catch(() => null);
-        if (errBody?.error === "invalid_screenshot" || errBody?.error === "duplicate_receipt") {
-          showToast(errBody.message || (lang === "ar" ? "حدث خطأ في الصورة المرفوعة" : "There was a problem with the uploaded image"));
+        if (errBody?.error === "invalid_screenshot" || errBody?.error === "duplicate_receipt" || errBody?.error === "already_subscribed") {
+          showToast(errBody.message || (lang === "ar" ? "حدث خطأ في طلب الاشتراك" : "There was a problem with the subscription request"));
           return;
         }
         throw new Error("subscribe_failed");

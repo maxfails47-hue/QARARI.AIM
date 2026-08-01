@@ -279,7 +279,10 @@ function buildPrompt(opts: {
 - pros: 3-4 complete specific sentences (not short phrases).
 - cons: 2-3 complete specific sentences (not short phrases).
 - hiddenRisks: 3-4 specific, actionable items (seller verification, serial number checks, spec mismatches vs the stated usage profile).
-- Also include "negotiationScriptVariants": { "polite": {"ar":"...","en":"..."}, "firm": {"ar":"...","en":"..."} } IN ADDITION to negotiationScript.`
+- Also include "negotiationScriptVariants": { "polite": {"ar":"...","en":"..."}, "firm": {"ar":"...","en":"..."} } IN ADDITION to negotiationScript.
+  - "polite": Very friendly, indirect style ("if possible", "could you"), soft opening, no pressure.
+  - "firm": Direct, confident, opens with a specific offer immediately, no excessive apologies, assertive but respectful tone.
+  - The two variants MUST differ significantly in phrasing, opening, and tone.`
       : `FREE TIER DEPTH:
 - reasoningPoints: 2-3 short numbered points.
 - pros: 2-4 short bullet phrases.
@@ -846,6 +849,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (user) {
       const { data: row } = await admin.from("users").select("scans_used_this_month").eq("id", user.id).single();
       await admin.from("users").update({ scans_used_this_month: (row?.scans_used_this_month || 0) + 1 }).eq("id", user.id);
+
+      // Edit 4: Automatically save premium analyses to history
+      if (tier === "premium") {
+        try {
+          console.log("[/api/analyze] Auto-saving premium report to history for user:", user.id);
+          await admin.from("analyses").insert({
+            user_id: user.id,
+            product: result.product,
+            offered_price: result.offeredPrice,
+            currency: result.currency,
+            verdict: result.verdict,
+            market_fair_price_min: result.marketFairPriceMin || 0,
+            market_fair_price_max: result.marketFairPriceMax || 0,
+            market_fair_price_mid: result.marketFairPriceMid || 0,
+            money_saved: result.moneySaved || 0,
+            full_report: result,
+          });
+
+          // Update total money saved for the user
+          if (typeof result.moneySaved === "number" && result.moneySaved > 0) {
+            const { data: userRow } = await admin.from("users").select("total_money_saved").eq("id", user.id).single();
+            await admin
+              .from("users")
+              .update({ total_money_saved: (userRow?.total_money_saved || 0) + result.moneySaved })
+              .eq("id", user.id);
+          }
+        } catch (saveErr) {
+          console.error("[/api/analyze] Failed to auto-save premium report:", saveErr);
+        }
+      }
     } else {
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
       const now = new Date();

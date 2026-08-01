@@ -114,6 +114,10 @@ export interface CompareResult {
   resaleValueTimeframe?: string;
   warrantyScoreA?: number;
   warrantyScoreB?: number;
+  marketFairPriceMinA?: number | null;
+  marketFairPriceMaxA?: number | null;
+  marketFairPriceMinB?: number | null;
+  marketFairPriceMaxB?: number | null;
 }
 
 export interface UserProfile {

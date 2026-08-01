@@ -259,11 +259,20 @@ async function handleScansRemaining(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-function buildComparePrompt(productA: string, productB: string, priceA: number, priceB: number, currency: string) {
-  return `You are a purchase-decision analyst with real-time web search access. Research CURRENT real market data for these two products and produce a structured JSON comparison.
+function buildComparePrompt(
+  productA: string, productB: string,
+  priceA: number, priceB: number,
+  fairA: { min: number|null; max: number|null; mid: number|null },
+  fairB: { min: number|null; max: number|null; mid: number|null },
+  currency: string
+) {
+  return `You are a purchase-decision analyst producing a structured JSON comparison for these two products.
 
 PRODUCT A: ${productA} — offered price ${priceA} ${currency}
+MARKET FAIR PRICE FOR A: min ${fairA.min ?? "null"}, max ${fairA.max ?? "null"}, mid ${fairA.mid ?? "null"}
+
 PRODUCT B: ${productB} — offered price ${priceB} ${currency}
+MARKET FAIR PRICE FOR B: min ${fairB.min ?? "null"}, max ${fairB.max ?? "null"}, mid ${fairB.mid ?? "null"}
 
 Return a JSON object with EXACTLY this shape (all text fields must have both "ar" and "en" versions, natural fluent Arabic and English — not machine-translated):
 
@@ -276,15 +285,19 @@ Return a JSON object with EXACTLY this shape (all text fields must have both "ar
   "resaleValueB": number,
   "resaleValueTimeframe": "1year",
   "warrantyScoreA": number,
-  "warrantyScoreB": number
+  "warrantyScoreB": number,
+  "marketFairPriceMinA": number | null,
+  "marketFairPriceMaxA": number | null,
+  "marketFairPriceMinB": number | null,
+  "marketFairPriceMaxB": number | null
 }
 
 Rules:
 - Include at least 6 comparison rows covering: price value, build/quality, performance, future compatibility/longevity, resale value potential, warranty/service availability, and overall value for money.
-- "winner" must be based on real researched facts about these specific products, never random.
-- finalRecommendation must weigh both the researched facts and the two offered prices (${priceA} ${currency} vs ${priceB} ${currency}).
-- resaleValueA/B: Estimate what each product will be worth in 1 year (as a percentage of current price, e.g., 65 means 65% of current price). Base this on brand reputation and market demand.
-- warrantyScoreA/B: Rate warranty availability and service center accessibility on a scale of 1-10 (10 = excellent warranty + many service centers, 1 = no warranty + hard to find service).
+- "winner": Judge based on the proximity of the offered price to the fair market price (value for money), not just the lower number. A product with a higher price but closer to its fair value can win the price/value row.
+- finalRecommendation must weigh both the researched facts and the two offered prices relative to their market values.
+- resaleValueA/B: Estimate what each product will be worth in 1 year (as a percentage of current price, e.g., 65 means 65% of current price).
+- warrantyScoreA/B: Rate warranty availability on a scale of 1-10.
 - Return ONLY the JSON object, nothing else.`;
 }
 
@@ -349,18 +362,27 @@ async function handleCompare(req: VercelRequest, res: VercelResponse) {
   }
 
   // Section 15: Use dynamic limit from user row (stored when plan was activated)
-  const comparesLimit = userRow.compares_limit_this_month || DEFAULT_COMPARE_LIMIT;
+  // Edit 1: Use ?? to correctly handle 0 as a valid limit
+  const comparesLimit = userRow.compares_limit_this_month ?? DEFAULT_COMPARE_LIMIT;
 
   if (comparesUsed >= comparesLimit) {
     return res.status(403).json({ error: "compare_limit_reached", remaining: 0, max: comparesLimit });
   }
 
-  const prompt = buildComparePrompt(productA, productB, Number(priceA), Number(priceB), currency || "EGP");
+  // Edit 8: Perform separate fair price research for each product
+  const curr = currency || "EGP";
+  logStep(`Researching fair price for Product A: ${productA}...`);
+  const fairA = await getFairPriceRange(productA, Number(priceA), curr as any);
+  logStep(`Researching fair price for Product B: ${productB}...`);
+  const fairB = await getFairPriceRange(productB, Number(priceB), curr as any);
+
+  const prompt = buildComparePrompt(productA, productB, Number(priceA), Number(priceB), fairA, fairB, curr);
 
   let aiResult;
   try {
-    logStep("Calling AI pipeline (Groq + Tavily) for comparison...");
-    aiResult = await callAiWithFallback(prompt);
+    logStep("Calling AI (Groq) for comparison analysis...");
+    // useSearch: false because we already did the search per product
+    aiResult = await callAiWithFallback(prompt, undefined, false);
   } catch (e: any) {
     console.error("[/api/user?action=compare] AI pipeline failed (both primary and fallback exhausted):", e, e?.stack);
     return res.status(502).json({ error: "comparison_failed", reason: e?.message });
@@ -402,6 +424,10 @@ async function handleCompare(req: VercelRequest, res: VercelResponse) {
     resaleValueTimeframe: "1year",
     warrantyScoreA,
     warrantyScoreB,
+    marketFairPriceMinA: fairA.min,
+    marketFairPriceMaxA: fairA.max,
+    marketFairPriceMinB: fairB.min,
+    marketFairPriceMaxB: fairB.max,
     remaining: Math.max(0, comparesLimit - newComparesUsed),
     max: comparesLimit,
   };
@@ -462,6 +488,17 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
   }
 
   const admin = getSupabaseAdmin();
+
+  // Edit 7: Prevent new subscription if one is already active
+  const { data: userRow } = await admin.from("users").select("tier, subscription_end_date").eq("id", user.id).single();
+  const now = new Date();
+  const stillActive = userRow?.tier === "premium" && (!userRow.subscription_end_date || new Date(userRow.subscription_end_date) >= now);
+  if (stillActive) {
+    return res.status(409).json({
+      error: "already_subscribed",
+      message: "لسه عندك باقة شغالة حالياً. مينفعش تفعّل باقة جديدة إلا بعد ما تخلص الباقة الحالية.",
+    });
+  }
 
   // ---- Fraud-reduction pre-check (never a replacement for manual review) ----
   // 1. Get a short-lived signed URL for the just-uploaded screenshot so the
@@ -589,6 +626,38 @@ async function handleClassifyIcon(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+async function handleComparesRemaining(req: VercelRequest, res: VercelResponse) {
+  const admin = getSupabaseAdmin();
+  const user = await getAuthedUser(req);
+  const now = new Date();
+
+  if (!user) {
+    return res.status(401).json({ error: "auth_required" });
+  }
+
+  const { data: row } = await admin
+    .from("users")
+    .select("tier, compares_used_this_month, compares_reset_at, compares_limit_this_month")
+    .eq("id", user.id)
+    .single();
+
+  if (!row) {
+    return res.status(404).json({ error: "user_not_found" });
+  }
+
+  if (row.tier !== "premium") {
+    return res.status(200).json({ remaining: 0, max: 0 });
+  }
+
+  const resetAt = new Date(row.compares_reset_at);
+  const needsReset = now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
+  const used = needsReset ? 0 : row.compares_used_this_month;
+  const max = row.compares_limit_this_month ?? DEFAULT_COMPARE_LIMIT;
+  const remaining = Math.max(0, max - used);
+
+  return res.status(200).json({ remaining, max });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const start = Date.now();
   logRequestStart(req);
@@ -600,6 +669,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     switch (action) {
       case "scans-remaining":
         result = await handleScansRemaining(req, res);
+        break;
+      case "compares-remaining":
+        result = await handleComparesRemaining(req, res);
         break;
       case "compare":
         result = await handleCompare(req, res);
