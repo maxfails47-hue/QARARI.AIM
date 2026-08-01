@@ -66,15 +66,8 @@ USER'S QUESTION: ${question}
 
 ${languageInstruction} Be conversational, warm, and helpful. Keep answers to 3-5 sentences. If you suggest products, mention realistic price ranges. Always end with a helpful proactive tip or suggestion.
 
-Edit 9: If the user's question includes a budget or a specific amount and asks for a product recommendation (mobile, laptop, camera, etc.), also return a "productSuggestions" field with 2-3 real products currently available in the market, with accurate names/models, approximate prices in the currency of the question, and a short reason why it fits their budget and use case. If the question is not about product suggestions with a budget, return "productSuggestions": [].
-
 Return a JSON object with EXACTLY this shape and nothing else:
-{
-  "answer": string,
-  "productSuggestions": [
-    { "name": string, "approxPrice": string, "reason": string }
-  ]
-}`;
+{ "answer": string }`;
 }
 
 function buildChatPrompt(opts: {
@@ -165,9 +158,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     console.log("[/api/ask] Input OK. mode:", mode, "| question:", question.slice(0, 50));
 
-    // Edit 3: Special ping action to just fetch remaining advisor messages
-    const action = req.body?.action;
-
     console.log("Checking authentication...");
     const admin = getSupabaseAdmin();
     const user = await getAuthedUser(req);
@@ -203,29 +193,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let used = 0;
     let maxMessages = mode === "advisor" ? MAX_ADVISOR_MESSAGES_PER_MONTH_FREE : MAX_CHAT_MESSAGES_PER_REPORT;
 
-    if (mode === "report") {
-      // Edit 3: Report mode always uses per-report cap (20), regardless of tier.
-      maxMessages = MAX_CHAT_MESSAGES_PER_REPORT;
-      console.log("[/api/ask] Loading report chat usage for report_id:", reportId);
-      const { data: usageRow } = await admin
-        .from("chat_usage")
-        .select("messages_used")
-        .eq("report_id", reportId)
-        .eq("identity", identity)
-        .single();
-
-      used = usageRow?.messages_used || 0;
-      console.log("[/api/ask] Chat usage loaded. used:", used);
-    } else if (isPremiumTier) {
-      // Edit 3: Advisor mode for Premium uses dynamic monthly limit from user row.
-      console.log("[/api/ask] Loading premium advisor usage for user:", user!.id);
+    if (isPremiumTier) {
+      // Section 15: Premium: use dynamic limit from user row (stored when plan was activated)
+      // Shared counter across report-chat AND advisor-chat (same reset pattern as compares).
+      maxMessages = DEFAULT_PREMIUM_CHAT_MONTHLY_LIMIT;
+      console.log("[/api/ask] Loading premium chat usage for user:", user!.id);
       const { data: premiumRow } = await admin
         .from("users")
-        .select("premium_chat_used_this_month, premium_chat_reset_at, chat_messages_limit")
+        .select("premium_chat_used_this_month, premium_chat_reset_at")
         .eq("id", user!.id)
         .single();
 
-      maxMessages = premiumRow?.chat_messages_limit ?? DEFAULT_PREMIUM_CHAT_MONTHLY_LIMIT;
       const now = new Date();
       const resetAt = premiumRow?.premium_chat_reset_at ? new Date(premiumRow.premium_chat_reset_at) : null;
       const needsReset = !resetAt || now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
@@ -236,7 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         used = premiumRow?.premium_chat_used_this_month || 0;
       }
-      console.log("[/api/ask] Premium advisor usage loaded. used:", used, "| max:", maxMessages);
+      console.log("[/api/ask] Premium chat usage loaded. used:", used, "| max:", maxMessages);
     } else if (mode === "advisor") {
       // Open advisor mode (Free/guest): track monthly usage per user/IP
       console.log("[/api/ask] Loading advisor usage for identity:", identity);
@@ -279,11 +257,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (used >= maxMessages) {
       console.warn("[/api/ask] Chat message limit reached. identity:", identity, "| used:", used, "| mode:", mode, "| tier:", tier);
       return res.status(403).json({ error: "chat_limit_reached", remaining: 0, max: maxMessages });
-    }
-
-    // Edit 3: Handle PING action for counter fetching
-    if (action === "advisor-remaining") {
-      return res.status(200).json({ remaining: Math.max(0, maxMessages - used), max: maxMessages });
     }
 
     let prompt: string;
@@ -345,9 +318,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: "ask_invalid" });
     }
 
-    // Edit 9: Extract product suggestions
-    const productSuggestions = Array.isArray(aiResult.data?.productSuggestions) ? aiResult.data.productSuggestions : [];
-
     // Section 25: log every real Groq call, same as /api/analyze and /api/compare.
     console.log("Saving database...");
     await logAiUsage(admin, {
@@ -360,16 +330,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ---- Record usage AFTER a successful answer (never before) ----
     const newUsed = used + 1;
-    if (mode === "report") {
-      // Edit 3: Always record report-mode usage in chat_usage table
-      await admin.from("chat_usage").upsert({
-        report_id: reportId,
-        identity,
-        messages_used: newUsed,
-        updated_at: new Date().toISOString(),
-      });
-    } else if (isPremiumTier) {
-      // Edit 3: Premium Advisor uses monthly counter
+    if (isPremiumTier) {
+      // Premium: bump the single shared monthly counter, regardless of mode.
       await admin.from("users").update({ premium_chat_used_this_month: newUsed }).eq("id", user!.id);
     } else if (mode === "advisor") {
       await admin.from("advisor_usage").upsert({
@@ -451,8 +413,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logRequestSuccess(start);
     return res.status(200).json({
       answer: answer.trim(),
-      // Edit 9: Include product suggestions in the response
-      productSuggestions,
       // Everyone now has a real cap (Free/guest: 20/mo or 20/report; Premium:
       // 150/mo shared) — "unlimited" is kept in the response shape only so
       // older clients don't break, but it's always false now.

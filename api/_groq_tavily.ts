@@ -111,8 +111,7 @@ function extractTargetCurrency(prompt: string): string | null {
 }
 
 function extractProductName(prompt: string): string {
-  // Edit 8: Support PRODUCT A: and PRODUCT B: for comparisons
-  const match = prompt.match(/PRODUCT(?:\s*[AB])?:\s*(.+)/i);
+  const match = prompt.match(/PRODUCT:\s*(.+)/i);
   return match ? match[1].trim() : "";
 }
 

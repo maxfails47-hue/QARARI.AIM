@@ -36,9 +36,9 @@ export function InputScreen() {
   // Chat Assistant State
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string; productSuggestions?: any[] }[]>([]);
+  const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatRemaining, setChatRemaining] = useState<number | null>(null);
+  const [chatRemaining, setChatRemaining] = useState(isPremium ? 150 : 20);
   const [chatLimitHit, setChatLimitHit] = useState(false);
   const [listening, setListening] = useState(false);
   const [productVoiceListening, setProductVoiceListening] = useState(false);
@@ -162,7 +162,7 @@ export function InputScreen() {
 
       const data = await res.json();
       if (data.answer) {
-        setChatMessages((prev) => [...prev, { role: "assistant", content: data.answer, productSuggestions: data.productSuggestions }]);
+        setChatMessages((prev) => [...prev, { role: "assistant", content: data.answer }]);
       } else {
         // Fallback for raw text if any (though backend should return JSON now)
         const text = typeof data === 'string' ? data : JSON.stringify(data);
@@ -270,8 +270,6 @@ export function InputScreen() {
         if (deviceFingerprint) {
           body.deviceFingerprint = deviceFingerprint;
         }
-        
-        // Fetch scans remaining
         const res = await fetch("/api/user?action=scans-remaining", {
           method: "POST",
           headers,
@@ -280,18 +278,6 @@ export function InputScreen() {
         const data = await res.json();
         setRemaining(data.unlimited ? null : data.remaining);
         if (typeof data.max === "number") setMaxScans(data.max);
-
-        // Edit 3: Fetch advisor chat remaining
-        const chatRes = await fetch("/api/ask", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ ...body, action: "advisor-remaining", mode: "advisor", question: "PING" }),
-        });
-        const chatData = await chatRes.json();
-        if (typeof chatData.remaining === "number") {
-          setChatRemaining(chatData.remaining);
-          if (chatData.remaining <= 0) setChatLimitHit(true);
-        }
       } catch {
         setRemaining(null);
       }
@@ -736,78 +722,22 @@ export function InputScreen() {
                     </button>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {chatMessages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-center">
-                      {/* Edit 9: Discoverability Card */}
-                      <div className="mb-6 w-full rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-center ring-1 ring-amber-500/10">
-                        <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20">
-                          <DollarSign className="h-5 w-5 text-amber-400" />
-                        </div>
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">جديد ✨</p>
-                        <p className="mt-1 text-xs font-medium text-zinc-300">
-                          {lang === "ar" 
-                            ? "قول للمساعد ميزانيتك وهو يرشحلك أفضل الخيارات"
-                            : "Tell the advisor your budget and get the best recommendations"}
-                        </p>
+                    <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
+                      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300/20 to-amber-600/20 ring-1 ring-amber-500/20">
+                        <Sparkles className="h-7 w-7 text-amber-400" />
                       </div>
-
-                      {/* Edit 9: Suggestion Chips */}
-                      <div className="mb-8 flex flex-wrap justify-center gap-2">
-                        {[
-                          lang === "ar" ? "عايز موبايل في حدود 15,000" : "I want a phone around 15k",
-                          lang === "ar" ? "لابتوب للدراسة بـ 25,000" : "Study laptop for 25k",
-                          lang === "ar" ? "أحسن سماعة في حدود 3,000" : "Best earbuds around 3k"
-                        ].map((chip, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => { setChatInput(chip); }}
-                            className="rounded-full border border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-[11px] text-zinc-400 transition-all hover:border-amber-500/30 hover:text-amber-400"
-                          >
-                            {chip}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="opacity-40">
-                        <div className="mb-3 mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800 ring-1 ring-zinc-700">
-                          <Sparkles className="h-6 w-6 text-zinc-500" />
-                        </div>
-                        <p className="text-xs text-zinc-500">{t("askAssistantHint")}</p>
-                      </div>
+                      <p className="text-xs text-zinc-500">{t("askAssistantHint")}</p>
                     </div>
                   ) : (
                     chatMessages.map((msg, i) => (
-                      <div key={i} className="space-y-3">
-                        <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                            msg.role === "user" ? "bg-amber-500 text-black font-medium" : "bg-zinc-800 text-zinc-200 border border-zinc-700"
-                          }`}>
-                            {msg.content}
-                          </div>
+                      <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                          msg.role === "user" ? "bg-amber-500 text-black font-medium" : "bg-zinc-800 text-zinc-200 border border-zinc-700"
+                        }`}>
+                          {msg.content}
                         </div>
-                        
-                        {/* Edit 9: Product Suggestion Cards */}
-                        {msg.role === "assistant" && msg.productSuggestions && msg.productSuggestions.length > 0 && (
-                          <div className="space-y-2 pr-4">
-                            {msg.productSuggestions.map((item: any, idx: number) => (
-                              <div key={idx} className="rounded-xl border border-amber-500/15 bg-zinc-900/60 p-3 shadow-sm ring-1 ring-amber-500/5">
-                                <div className="flex items-center justify-between gap-2">
-                                  <h4 className="text-xs font-bold text-zinc-100">{item.name}</h4>
-                                  <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-400 ring-1 ring-amber-500/20">
-                                    {item.approxPrice}
-                                  </span>
-                                </div>
-                                <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-400">{item.reason}</p>
-                              </div>
-                            ))}
-                            <p className="text-[9px] text-zinc-600 italic">
-                              {lang === "ar" 
-                                ? "* الأسعار تقريبية من معرفة المساعد العامة مش من بحث لحظي بالسوق"
-                                : "* Prices are approximate based on general knowledge, not real-time search"}
-                            </p>
-                          </div>
-                        )}
                       </div>
                     ))
                   )}

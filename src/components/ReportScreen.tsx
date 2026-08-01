@@ -92,7 +92,7 @@ export function ReportScreen() {
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatRemaining, setChatRemaining] = useState<number | null>(null);
+  const [chatRemaining, setChatRemaining] = useState(isPremium ? 150 : 20);
   const [chatLimitHit, setChatLimitHit] = useState(false);
   const [listening, setListening] = useState(false);
   const [negVariant, setNegVariant] = useState<"polite" | "firm">("polite");
@@ -109,41 +109,6 @@ export function ReportScreen() {
   // Temporary debug log — remove once the null/undefined-field rendering
   // issue is confirmed fixed in production.
   console.log("FULL AI RESPONSE:", report);
-
-  // Edit 3: Fetch initial chat remaining count for this report
-  useMemo(() => {
-    if (isExample) {
-      setChatRemaining(20);
-      return;
-    }
-    const fetchRemaining = async () => {
-      try {
-        const res = await fetch("/api/ask", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-          },
-          body: JSON.stringify({
-            action: "advisor-remaining", // Works for report mode too to just get count
-            reportId: report.id,
-            mode: "report",
-            question: "PING",
-            product: report.product,
-            offeredPrice: report.offeredPrice
-          }),
-        });
-        const data = await res.json();
-        if (typeof data.remaining === "number") {
-          setChatRemaining(data.remaining);
-          if (data.remaining <= 0) setChatLimitHit(true);
-        }
-      } catch (e) {
-        setChatRemaining(20);
-      }
-    };
-    fetchRemaining();
-  }, [report.id, session]);
 
   // ---- Defensive formatting helpers ----
   // The AI is allowed to return null for pricing fields when it has no
@@ -182,10 +147,6 @@ export function ReportScreen() {
   const ProductIcon = useMemo(() => getCategoryIcon(report.product), [report.product]);
 
   const handleSave = () => {
-    if (isPremium && isSaved) {
-      showToast(lang === "ar" ? "تم الحفظ في السجل تلقائياً ✓" : "Already saved to history automatically ✓");
-      return;
-    }
     requireAuth(async () => {
       const ok = await saveToHistory(report);
       showToast(ok ? t("saveToHistory") + " ✓" : (lang === "ar" ? "حصل خطأ، حاول تاني" : "Something went wrong, please try again"));
@@ -203,19 +164,13 @@ export function ReportScreen() {
   };
 
   const handleCopyNegotiation = () => {
-    // Edit 5: Copy the selected variant for premium users
-    const text = isPremium && report.negotiationScriptVariants
-      ? bilingualSafe(report.negotiationScriptVariants[negVariant])
-      : bilingualSafe(report.negotiationScript);
+    const text = bilingualSafe(report.negotiationScript);
     navigator.clipboard.writeText(text);
     showToast(t("copied"));
   };
 
   const handleWhatsAppShare = () => {
-    // Edit 5: Share the selected variant for premium users
-    const text = isPremium && report.negotiationScriptVariants
-      ? bilingualSafe(report.negotiationScriptVariants[negVariant])
-      : bilingualSafe(report.negotiationScript);
+    const text = bilingualSafe(report.negotiationScript);
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
 
@@ -691,12 +646,7 @@ export function ReportScreen() {
           </div>
         )}
         <div className="rounded-xl bg-zinc-800/40 p-4">
-          {/* Edit 5: Render the selected negotiation variant for premium users */}
-          <p className="text-sm leading-relaxed text-zinc-200">
-            {isPremium && report.negotiationScriptVariants
-              ? bilingualSafe(report.negotiationScriptVariants[negVariant])
-              : bilingualSafe(report.negotiationScript)}
-          </p>
+          <p className="text-sm leading-relaxed text-zinc-200">{bilingual(report.negotiationScript)}</p>
         </div>
         <div className="mt-3 flex gap-2">
           <Button onClick={handleCopyNegotiation} variant="outline" className="flex-1 border-zinc-700 bg-transparent text-zinc-300 hover:bg-zinc-800 hover:text-amber-400">
@@ -766,8 +716,8 @@ export function ReportScreen() {
 
       {/* Footer Actions */}
       <div className="grid grid-cols-2 gap-3">
-        <Button onClick={handleSave} className="bg-amber-500 text-[#0B0B0F] hover:bg-amber-400">
-          <Bookmark className="h-4 w-4" /> {isSaved ? (isPremium ? (lang === "ar" ? "محفوظ ✓" : "Saved ✓") : "✓ " + t("saveToHistory")) : t("saveToHistory")}
+        <Button onClick={handleSave} disabled={isSaved} className="bg-amber-500 text-[#0B0B0F] hover:bg-amber-400 disabled:opacity-50">
+          <Bookmark className="h-4 w-4" /> {isSaved ? "✓ " + t("saveToHistory") : t("saveToHistory")}
         </Button>
         <Button onClick={handleShare} variant="outline" className="border-zinc-700 bg-transparent text-zinc-300 hover:bg-zinc-800 hover:text-amber-400">
           <Share2 className="h-4 w-4" /> {t("shareReport")}

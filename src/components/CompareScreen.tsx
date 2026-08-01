@@ -12,14 +12,12 @@ import { GitCompare, ChevronLeft, Crown, Check, Sparkles } from "lucide-react";
 
 export function CompareScreen() {
   const { t, lang, dir, navigate, currentCompare, setCurrentCompare, isPremium, currentReport, showToast, session } = useApp();
-  // Edit 6: Initialize from currentReport but allow manual clearing
   const [productA, setProductA] = useState(currentReport?.product || "");
   const [productB, setProductB] = useState("");
   const [priceA, setPriceA] = useState(currentReport ? String(currentReport.offeredPrice) : "");
   const [priceB, setPriceB] = useState("");
   const [currency, setCurrency] = useState(currentReport?.currency || "EGP");
   const [loading, setLoading] = useState(false);
-  const [comparesRemaining, setComparesRemaining] = useState<{ remaining: number; max: number } | null>(null);
 
   // Pick up a product-B handoff left by ReportScreen's inline "compare with
   // another product" box, if the person arrived here that way.
@@ -31,24 +29,7 @@ export function CompareScreen() {
     }
   }, []);
 
-  // Edit 2: Fetch remaining compares
-  useEffect(() => {
-    if (isPremium && session?.access_token) {
-      fetch("/api/user?action=compares-remaining", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && typeof data.remaining === "number") {
-            setComparesRemaining(data);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [isPremium, session]);
-
-  // Edit 1: Block users with 0 compares limit (small_bundle)
-  if (!isPremium || (comparesRemaining && comparesRemaining.max === 0)) {
+  if (!isPremium) {
     return (
       <div className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center px-4 text-center">
         <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-amber-600 shadow-xl">
@@ -136,8 +117,7 @@ export function CompareScreen() {
         </div>
 
         {/* VS Header */}
-        <div className="mb-6 grid grid-cols-[1fr_auto_1fr] items-start gap-4">
-          {/* Product A Card */}
+        <div className="mb-6 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
           <div className="text-center">
             <div className="relative mx-auto mb-2 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-800 via-zinc-900 to-black shadow-lg ring-1 ring-amber-500/20">
               <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/10 via-transparent to-transparent" />
@@ -145,25 +125,10 @@ export function CompareScreen() {
             </div>
             <h3 className="truncate text-sm font-bold text-zinc-100">{currentCompare.productA}</h3>
             <p className="text-xs text-amber-400">{currentCompare.priceA.toLocaleString()} {shortLabel}</p>
-            
-            {/* Edit 8: Fair Price A */}
-            <div className="mt-3 rounded-lg border border-amber-500/10 bg-zinc-900/40 p-2 ring-1 ring-amber-500/5">
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight">
-                {lang === "ar" ? "السعر العادل بالسوق" : "Market Fair Price"}
-              </p>
-              <p className="mt-0.5 text-[11px] font-bold text-amber-400/90">
-                {currentCompare.marketFairPriceMinA !== null && currentCompare.marketFairPriceMaxA !== null
-                  ? `${currentCompare.marketFairPriceMinA.toLocaleString()}–${currentCompare.marketFairPriceMaxA.toLocaleString()}`
-                  : (lang === "ar" ? "غير متاح حالياً" : "Not available")}
-              </p>
-            </div>
           </div>
-
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-amber-600 shadow-lg mt-2">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-amber-600 shadow-lg">
             <span className="text-sm font-bold text-[#0B0B0F]">{t("vs")}</span>
           </div>
-
-          {/* Product B Card */}
           <div className="text-center">
             <div className="relative mx-auto mb-2 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-800 via-zinc-900 to-black shadow-lg ring-1 ring-amber-500/20">
               <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/10 via-transparent to-transparent" />
@@ -171,61 +136,38 @@ export function CompareScreen() {
             </div>
             <h3 className="truncate text-sm font-bold text-zinc-100">{currentCompare.productB}</h3>
             <p className="text-xs text-amber-400">{currentCompare.priceB.toLocaleString()} {shortLabel}</p>
-
-            {/* Edit 8: Fair Price B */}
-            <div className="mt-3 rounded-lg border border-amber-500/10 bg-zinc-900/40 p-2 ring-1 ring-amber-500/5">
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight">
-                {lang === "ar" ? "السعر العادل بالسوق" : "Market Fair Price"}
-              </p>
-              <p className="mt-0.5 text-[11px] font-bold text-amber-400/90">
-                {currentCompare.marketFairPriceMinB !== null && currentCompare.marketFairPriceMaxB !== null
-                  ? `${currentCompare.marketFairPriceMinB.toLocaleString()}–${currentCompare.marketFairPriceMaxB.toLocaleString()}`
-                  : (lang === "ar" ? "غير متاح حالياً" : "Not available")}
-              </p>
-            </div>
           </div>
         </div>
 
         {/* Comparison Rows */}
         <div className="mb-6 space-y-2">
-          {currentCompare.rows.map((row, i) => {
-            const isValueRow = bilingual(row.category).includes(lang === "ar" ? "قيمة" : "value");
-            return (
-              <div key={i} className="rounded-xl border border-amber-500/15 bg-zinc-900/60 p-4">
-                <p className="mb-3 text-center text-xs font-bold text-amber-400">{bilingual(row.category)}</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className={`rounded-lg p-3 text-center text-sm ${
-                    row.winner === "A" ? "bg-amber-500/10 ring-1 ring-amber-500/30" : "bg-zinc-800/40"
-                  }`}>
-                    <div className="flex items-center justify-center gap-1.5">
-                      {row.winner === "A" && <Check className="h-4 w-4 text-amber-400" />}
-                      <span className={row.winner === "A" ? "text-amber-400 font-medium" : "text-zinc-300"}>
-                        {bilingual(row.valueA)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className={`rounded-lg p-3 text-center text-sm ${
-                    row.winner === "B" ? "bg-amber-500/10 ring-1 ring-amber-500/30" : "bg-zinc-800/40"
-                  }`}>
-                    <div className="flex items-center justify-center gap-1.5">
-                      {row.winner === "B" && <Check className="h-4 w-4 text-amber-400" />}
-                      <span className={row.winner === "B" ? "text-amber-400 font-medium" : "text-zinc-300"}>
-                        {bilingual(row.valueB)}
-                      </span>
-                    </div>
+          {currentCompare.rows.map((row, i) => (
+            <div key={i} className="rounded-xl border border-amber-500/15 bg-zinc-900/60 p-4">
+              <p className="mb-3 text-center text-xs font-bold text-amber-400">{bilingual(row.category)}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`rounded-lg p-3 text-center text-sm ${
+                  row.winner === "A" ? "bg-amber-500/10 ring-1 ring-amber-500/30" : "bg-zinc-800/40"
+                }`}>
+                  <div className="flex items-center justify-center gap-1.5">
+                    {row.winner === "A" && <Check className="h-4 w-4 text-amber-400" />}
+                    <span className={row.winner === "A" ? "text-amber-400 font-medium" : "text-zinc-300"}>
+                      {bilingual(row.valueA)}
+                    </span>
                   </div>
                 </div>
-                {/* Edit 8: Add value-based explanation for the price/value row */}
-                {isValueRow && (
-                  <p className="mt-2 text-center text-[10px] text-zinc-500 italic">
-                    {lang === "ar" 
-                      ? "الحكم بناءً على القيمة مقابل السعر الحقيقي بالسوق، مش بس الرقم الأصغر."
-                      : "Judged based on value relative to real market price, not just the lower number."}
-                  </p>
-                )}
+                <div className={`rounded-lg p-3 text-center text-sm ${
+                  row.winner === "B" ? "bg-amber-500/10 ring-1 ring-amber-500/30" : "bg-zinc-800/40"
+                }`}>
+                  <div className="flex items-center justify-center gap-1.5">
+                    {row.winner === "B" && <Check className="h-4 w-4 text-amber-400" />}
+                    <span className={row.winner === "B" ? "text-amber-400 font-medium" : "text-zinc-300"}>
+                      {bilingual(row.valueB)}
+                    </span>
+                  </div>
+                </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
 
         {/* Resale Value & Warranty Score */}
@@ -300,17 +242,6 @@ export function CompareScreen() {
         </div>
 
         <div className="space-y-5">
-          {/* Edit 2: Compares Counter */}
-          {comparesRemaining && (
-            <div className="rounded-xl bg-amber-500/10 p-3 text-center ring-1 ring-amber-500/20">
-              <p className="text-xs font-bold text-amber-400">
-                {lang === "ar" 
-                  ? `باقي لك ${comparesRemaining.remaining} مقارنة من ${comparesRemaining.max}`
-                  : `You have ${comparesRemaining.remaining} compares left out of ${comparesRemaining.max}`}
-              </p>
-            </div>
-          )}
-
           {/* Product A */}
           <div className="space-y-3">
             <Label className="text-sm font-bold text-amber-400">{t("productA")}</Label>

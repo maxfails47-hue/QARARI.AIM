@@ -86,17 +86,6 @@ async function handleApprove(req: VercelRequest, res: VercelResponse) {
     return res.status(409).json({ error: "already_reviewed" });
   }
 
-  // Edit 7: Safety layer — prevent approving if user already has an active subscription
-  const { data: userRow } = await admin.from("users").select("tier, subscription_end_date").eq("id", reqRow.user_id).single();
-  const now = new Date();
-  const stillActive = userRow?.tier === "premium" && (!userRow.subscription_end_date || new Date(userRow.subscription_end_date) >= now);
-  if (stillActive) {
-    return res.status(409).json({
-      error: "already_subscribed",
-      message: "User already has an active premium subscription.",
-    });
-  }
-
   const planConfig = getPlanConfig(reqRow.plan);
   if (!planConfig) {
     console.error("[/api/admin?action=approve] unknown plan:", reqRow.plan);
