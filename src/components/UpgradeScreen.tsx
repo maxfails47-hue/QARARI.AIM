@@ -69,7 +69,7 @@ export function UpgradeScreen() {
         // Arabic message from the server — show it directly so the person
         // knows exactly what to fix instead of a generic error.
         const errBody = await res.json().catch(() => null);
-        if (errBody?.error === "invalid_screenshot" || errBody?.error === "duplicate_receipt") {
+        if (errBody?.error === "invalid_screenshot" || errBody?.error === "duplicate_receipt" || errBody?.error === "already_subscribed") {
           showToast(errBody.message || (lang === "ar" ? "حدث خطأ في الصورة المرفوعة" : "There was a problem with the uploaded image"));
           return;
         }

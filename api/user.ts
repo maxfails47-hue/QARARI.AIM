@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabaseAdmin, getAuthedUser } from "./_supabaseAdmin.js";
-import { callAiWithFallback, classifyProductCategory, verifyPaymentScreenshot } from "./_groq_tavily.js";
+import { callAiWithFallback, classifyProductCategory, verifyPaymentScreenshot, getFairPriceRange, type FairPriceRange } from "./_groq_tavily.js";
 import { logAiUsage } from "./_costTracking.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep, logEnvPresence } from "./_logger.js";
 import { DEFAULT_PREMIUM_LIMITS, getAllPlans, getPlanConfig, FAIR_USE_CONFIG, getBurstLimit, FREE_TIER_LIMITS } from "./_planConfig.js";
@@ -259,11 +259,22 @@ async function handleScansRemaining(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-function buildComparePrompt(productA: string, productB: string, priceA: number, priceB: number, currency: string) {
-  return `You are a purchase-decision analyst with real-time web search access. Research CURRENT real market data for these two products and produce a structured JSON comparison.
+function buildComparePrompt(
+  productA: string,
+  productB: string,
+  priceA: number,
+  priceB: number,
+  currency: string,
+  fairA: FairPriceRange,
+  fairB: FairPriceRange
+) {
+  return `You are a purchase-decision analyst. You are given two products, each with the price the customer was offered AND the real current fair-market price range for that exact product (already researched — do not search again, use these numbers as ground truth). Produce a structured JSON comparison.
 
 PRODUCT A: ${productA} — offered price ${priceA} ${currency}
+MARKET FAIR PRICE FOR A: min ${fairA.min ?? "null"}, max ${fairA.max ?? "null"}, mid ${fairA.mid ?? "null"}
+
 PRODUCT B: ${productB} — offered price ${priceB} ${currency}
+MARKET FAIR PRICE FOR B: min ${fairB.min ?? "null"}, max ${fairB.max ?? "null"}, mid ${fairB.mid ?? "null"}
 
 Return a JSON object with EXACTLY this shape (all text fields must have both "ar" and "en" versions, natural fluent Arabic and English — not machine-translated):
 
@@ -282,10 +293,106 @@ Return a JSON object with EXACTLY this shape (all text fields must have both "ar
 Rules:
 - Include at least 6 comparison rows covering: price value, build/quality, performance, future compatibility/longevity, resale value potential, warranty/service availability, and overall value for money.
 - "winner" must be based on real researched facts about these specific products, never random.
-- finalRecommendation must weigh both the researched facts and the two offered prices (${priceA} ${currency} vs ${priceB} ${currency}).
+- For the price-value row specifically: judge by how close each offered price is to ITS OWN fair market range (value), never by which raw number is smaller. A product offered above its own fair range is a worse deal than a pricier product offered right at (or below) its own fair range — reflect that in the winner and in valueA/valueB text (mention the gap vs. the fair range, not just the price).
+- finalRecommendation must weigh both the researched facts and how each offered price compares to its own fair market range (not simply which number is lower).
 - resaleValueA/B: Estimate what each product will be worth in 1 year (as a percentage of current price, e.g., 65 means 65% of current price). Base this on brand reputation and market demand.
 - warrantyScoreA/B: Rate warranty availability and service center accessibility on a scale of 1-10 (10 = excellent warranty + many service centers, 1 = no warranty + hard to find service).
 - Return ONLY the JSON object, nothing else.`;
+}
+
+async function handleChatRemaining(req: VercelRequest, res: VercelResponse) {
+  // Advisor-mode chat only — this is what InputScreen shows before the
+  // first message is sent, mirroring scans-remaining. Report-mode chat
+  // stays a flat 20-per-report constant on the frontend (see item 3 —
+  // ReportScreen.tsx), so it needs no pre-fetch endpoint.
+  const admin = getSupabaseAdmin();
+  const user = await getAuthedUser(req);
+  const now = new Date();
+
+  if (user) {
+    const { data: row } = await admin
+      .from("users")
+      .select("tier, subscription_end_date, premium_chat_used_this_month, premium_chat_reset_at, chat_messages_limit")
+      .eq("id", user.id)
+      .single();
+
+    if (!row) {
+      return res.status(404).json({ error: "user_not_found" });
+    }
+
+    let tier: "free" | "premium" = row.tier;
+    if (tier === "premium" && row.subscription_end_date && new Date(row.subscription_end_date) < now) {
+      tier = "free";
+    }
+
+    if (tier === "premium") {
+      const resetAt = row.premium_chat_reset_at ? new Date(row.premium_chat_reset_at) : null;
+      const needsReset = !resetAt || now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
+      const used = needsReset ? 0 : row.premium_chat_used_this_month || 0;
+      const max = row.chat_messages_limit ?? DEFAULT_PREMIUM_LIMITS.chatMessages;
+      return res.status(200).json({ remaining: Math.max(0, max - used), max });
+    }
+  }
+
+  // Free / guest: same identity scheme as api/ask.ts (user:id or ip:x)
+  const identity = user
+    ? `user:${user.id}`
+    : `ip:${(req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown"}`;
+
+  const { data: advisorRow } = await admin
+    .from("advisor_usage")
+    .select("messages_used, reset_at")
+    .eq("identity", identity)
+    .single();
+
+  const resetAt = advisorRow?.reset_at ? new Date(advisorRow.reset_at) : null;
+  const needsReset = !resetAt || now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
+  const used = needsReset ? 0 : advisorRow?.messages_used || 0;
+  const max = FREE_TIER_LIMITS.chatMessages;
+
+  return res.status(200).json({ remaining: Math.max(0, max - used), max });
+}
+
+async function handleComparesRemaining(req: VercelRequest, res: VercelResponse) {
+  const admin = getSupabaseAdmin();
+  const user = await getAuthedUser(req);
+
+  // Compare is premium-only — no guest/free path, matching handleCompare's
+  // own auth_required / premium_required checks.
+  if (!user) {
+    return res.status(401).json({ error: "auth_required" });
+  }
+
+  const { data: userRow, error: userErr } = await admin
+    .from("users")
+    .select("tier, subscription_end_date, compares_used_this_month, compares_reset_at, compares_limit_this_month")
+    .eq("id", user.id)
+    .single();
+
+  if (userErr || !userRow) {
+    return res.status(404).json({ error: "user_not_found" });
+  }
+
+  const now = new Date();
+  let tier: "free" | "premium" = userRow.tier;
+  if (tier === "premium" && userRow.subscription_end_date && new Date(userRow.subscription_end_date) < now) {
+    tier = "free";
+  }
+
+  if (tier !== "premium") {
+    return res.status(403).json({ error: "premium_required" });
+  }
+
+  const resetAt = new Date(userRow.compares_reset_at);
+  const needsReset = now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
+  const used = needsReset ? 0 : userRow.compares_used_this_month;
+
+  // Same ?? fix as item 1 — a plan with 0 compares (small_bundle) must stay 0,
+  // not fall back to DEFAULT_COMPARE_LIMIT just because 0 is falsy.
+  const max = userRow.compares_limit_this_month ?? DEFAULT_COMPARE_LIMIT;
+  const remaining = Math.max(0, max - used);
+
+  return res.status(200).json({ remaining, max });
 }
 
 async function handleCompare(req: VercelRequest, res: VercelResponse) {
@@ -349,18 +456,33 @@ async function handleCompare(req: VercelRequest, res: VercelResponse) {
   }
 
   // Section 15: Use dynamic limit from user row (stored when plan was activated)
-  const comparesLimit = userRow.compares_limit_this_month || DEFAULT_COMPARE_LIMIT;
+  const comparesLimit = userRow.compares_limit_this_month ?? DEFAULT_COMPARE_LIMIT;
 
   if (comparesUsed >= comparesLimit) {
     return res.status(403).json({ error: "compare_limit_reached", remaining: 0, max: comparesLimit });
   }
 
-  const prompt = buildComparePrompt(productA, productB, Number(priceA), Number(priceB), currency || "EGP");
+  // ---- Item 8 fix: real per-product fair market price, searched separately ----
+  // The old buildComparePrompt asked the AI to "research" both products in one
+  // shared call with no pre-fetched pricing signal of its own, and relied on
+  // extractProductName()'s `PRODUCT:` regex to pull a search term out of the
+  // prompt — but this prompt only ever contained "PRODUCT A:"/"PRODUCT B:",
+  // which never matched, so the search term was empty and no real fair price
+  // ever backed the comparison. Reuse the exact same getFairPriceRange
+  // pipeline analyze.ts uses for a single product, once per product here.
+  const reqCurrency = currency || "EGP";
+  const [fairA, fairB]: [FairPriceRange, FairPriceRange] = await Promise.all([
+    getFairPriceRange(productA, reqCurrency, "new", ""),
+    getFairPriceRange(productB, reqCurrency, "new", ""),
+  ]);
+  console.log("[/api/user?action=compare] Fair price A:", fairA.min, "-", fairA.max, "| B:", fairB.min, "-", fairB.max);
+
+  const prompt = buildComparePrompt(productA, productB, Number(priceA), Number(priceB), currency || "EGP", fairA, fairB);
 
   let aiResult;
   try {
-    logStep("Calling AI pipeline (Groq + Tavily) for comparison...");
-    aiResult = await callAiWithFallback(prompt);
+    logStep("Calling AI pipeline (Groq) for comparison (search already done per-product above)...");
+    aiResult = await callAiWithFallback(prompt, undefined, false);
   } catch (e: any) {
     console.error("[/api/user?action=compare] AI pipeline failed (both primary and fallback exhausted):", e, e?.stack);
     return res.status(502).json({ error: "comparison_failed", reason: e?.message });
@@ -402,6 +524,10 @@ async function handleCompare(req: VercelRequest, res: VercelResponse) {
     resaleValueTimeframe: "1year",
     warrantyScoreA,
     warrantyScoreB,
+    marketFairPriceMinA: fairA.min,
+    marketFairPriceMaxA: fairA.max,
+    marketFairPriceMinB: fairB.min,
+    marketFairPriceMaxB: fairB.max,
     remaining: Math.max(0, comparesLimit - newComparesUsed),
     max: comparesLimit,
   };
@@ -462,6 +588,25 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
   }
 
   const admin = getSupabaseAdmin();
+
+  // ---- Item 7: block requesting a new plan while one is already active ----
+  // Nothing previously stopped a premium user from firing off another
+  // subscribe request (and potentially getting double-charged / stacking
+  // plans) before their current one expires.
+  const { data: activeCheck } = await admin
+    .from("users")
+    .select("tier, subscription_end_date")
+    .eq("id", user.id)
+    .single();
+  const stillActive =
+    activeCheck?.tier === "premium" &&
+    (!activeCheck.subscription_end_date || new Date(activeCheck.subscription_end_date) >= new Date());
+  if (stillActive) {
+    return res.status(409).json({
+      error: "already_subscribed",
+      message: "لسه عندك باقة شغالة حاليًا. مينفعش تفعّل باقة جديدة إلا بعد ما تخلص الباقة الحالية.",
+    });
+  }
 
   // ---- Fraud-reduction pre-check (never a replacement for manual review) ----
   // 1. Get a short-lived signed URL for the just-uploaded screenshot so the
@@ -600,6 +745,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     switch (action) {
       case "scans-remaining":
         result = await handleScansRemaining(req, res);
+        break;
+      case "chat-remaining":
+        result = await handleChatRemaining(req, res);
+        break;
+      case "compares-remaining":
+        result = await handleComparesRemaining(req, res);
         break;
       case "compare":
         result = await handleCompare(req, res);

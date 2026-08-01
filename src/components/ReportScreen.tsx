@@ -92,7 +92,7 @@ export function ReportScreen() {
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatRemaining, setChatRemaining] = useState(isPremium ? 150 : 20);
+  const [chatRemaining, setChatRemaining] = useState(20);
   const [chatLimitHit, setChatLimitHit] = useState(false);
   const [listening, setListening] = useState(false);
   const [negVariant, setNegVariant] = useState<"polite" | "firm">("polite");
@@ -130,6 +130,13 @@ export function ReportScreen() {
   // local list here made the button permanently show "already saved" for
   // guests before they ever pressed it, since it always matched.
   const isSaved = !!session?.user && history.some((h) => h.id === report.id);
+  // Item 4: premium analyses are now auto-saved server-side the moment the
+  // analysis completes (api/analyze.ts), before the client's local
+  // `history` list has necessarily refreshed to include it. Trusting
+  // isPremium here (rather than waiting on that refresh) avoids the
+  // confusing moment where a premium user sees an active "Save" button for
+  // a report that's already in their history.
+  const effectivelySaved = isPremium || isSaved;
 
   const currencyShort = (code: string) => {
     const c = currencies.find((c) => c.code === code);
@@ -163,14 +170,19 @@ export function ReportScreen() {
     }
   };
 
+  const activeNegotiationText = (): { ar: string; en: string } =>
+    isPremium && report.negotiationScriptVariants
+      ? report.negotiationScriptVariants[negVariant]
+      : report.negotiationScript;
+
   const handleCopyNegotiation = () => {
-    const text = bilingualSafe(report.negotiationScript);
+    const text = bilingualSafe(activeNegotiationText());
     navigator.clipboard.writeText(text);
     showToast(t("copied"));
   };
 
   const handleWhatsAppShare = () => {
-    const text = bilingualSafe(report.negotiationScript);
+    const text = bilingualSafe(activeNegotiationText());
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
 
@@ -646,7 +658,7 @@ export function ReportScreen() {
           </div>
         )}
         <div className="rounded-xl bg-zinc-800/40 p-4">
-          <p className="text-sm leading-relaxed text-zinc-200">{bilingual(report.negotiationScript)}</p>
+          <p className="text-sm leading-relaxed text-zinc-200">{bilingual(activeNegotiationText())}</p>
         </div>
         <div className="mt-3 flex gap-2">
           <Button onClick={handleCopyNegotiation} variant="outline" className="flex-1 border-zinc-700 bg-transparent text-zinc-300 hover:bg-zinc-800 hover:text-amber-400">
@@ -716,8 +728,8 @@ export function ReportScreen() {
 
       {/* Footer Actions */}
       <div className="grid grid-cols-2 gap-3">
-        <Button onClick={handleSave} disabled={isSaved} className="bg-amber-500 text-[#0B0B0F] hover:bg-amber-400 disabled:opacity-50">
-          <Bookmark className="h-4 w-4" /> {isSaved ? "✓ " + t("saveToHistory") : t("saveToHistory")}
+        <Button onClick={handleSave} disabled={effectivelySaved} className="bg-amber-500 text-[#0B0B0F] hover:bg-amber-400 disabled:opacity-50">
+          <Bookmark className="h-4 w-4" /> {effectivelySaved ? "✓ " + t("saveToHistory") : t("saveToHistory")}
         </Button>
         <Button onClick={handleShare} variant="outline" className="border-zinc-700 bg-transparent text-zinc-300 hover:bg-zinc-800 hover:text-amber-400">
           <Share2 className="h-4 w-4" /> {t("shareReport")}

@@ -18,6 +18,9 @@ export function CompareScreen() {
   const [priceB, setPriceB] = useState("");
   const [currency, setCurrency] = useState(currentReport?.currency || "EGP");
   const [loading, setLoading] = useState(false);
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [maxCompares, setMaxCompares] = useState<number | null>(null);
+  const [quotaLoaded, setQuotaLoaded] = useState(false);
 
   // Pick up a product-B handoff left by ReportScreen's inline "compare with
   // another product" box, if the person arrived here that way.
@@ -29,6 +32,29 @@ export function CompareScreen() {
     }
   }, []);
 
+  // Same pattern as InputScreen's scans-remaining fetch: always
+  // server-authoritative, never a locally-guessed number. Also doubles as
+  // the source of truth for whether this plan even includes comparisons
+  // (max === 0 for small_bundle) — see the gate below.
+  useEffect(() => {
+    if (!isPremium) return;
+    async function fetchRemaining() {
+      try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+        const res = await fetch("/api/user?action=compares-remaining", { method: "POST", headers });
+        const data = await res.json();
+        if (typeof data.remaining === "number") setRemaining(data.remaining);
+        if (typeof data.max === "number") setMaxCompares(data.max);
+      } catch {
+        // leave remaining/max as null — counter just won't render
+      } finally {
+        setQuotaLoaded(true);
+      }
+    }
+    fetchRemaining();
+  }, [isPremium, session]);
+
   if (!isPremium) {
     return (
       <div className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center px-4 text-center">
@@ -36,6 +62,30 @@ export function CompareScreen() {
           <Crown className="h-8 w-8 text-[#0B0B0F]" />
         </div>
         <h2 className="font-serif text-xl font-bold text-amber-400">{t("premium")}</h2>
+        <Button onClick={() => navigate("upgrade")} className="mt-6 bg-gradient-to-r from-amber-400 to-amber-600 text-[#0B0B0F] font-bold hover:from-amber-300 hover:to-amber-500">
+          <Crown className="h-4 w-4" /> {t("subscribeNow")}
+        </Button>
+        <button onClick={() => navigate("input")} className="mt-4 text-sm text-zinc-500 hover:text-amber-400">
+          {t("back")}
+        </button>
+      </div>
+    );
+  }
+
+  // Item 1 fix: small_bundle (compares_limit_this_month === 0) is premium
+  // but still must not reach the comparison form at all.
+  if (quotaLoaded && maxCompares === 0) {
+    return (
+      <div className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center px-4 text-center">
+        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-amber-600 shadow-xl">
+          <Crown className="h-8 w-8 text-[#0B0B0F]" />
+        </div>
+        <h2 className="font-serif text-xl font-bold text-amber-400">
+          {lang === "ar" ? "الميزة دي مش متاحة في باقتك" : "This feature isn't included in your plan"}
+        </h2>
+        <p className="mt-2 text-sm text-zinc-400">
+          {lang === "ar" ? "رقّي باقتك عشان تقدر تقارن بين منتجين" : "Upgrade your plan to compare two products"}
+        </p>
         <Button onClick={() => navigate("upgrade")} className="mt-6 bg-gradient-to-r from-amber-400 to-amber-600 text-[#0B0B0F] font-bold hover:from-amber-300 hover:to-amber-500">
           <Crown className="h-4 w-4" /> {t("subscribeNow")}
         </Button>
@@ -88,6 +138,8 @@ export function CompareScreen() {
 
       const result = await res.json();
       setCurrentCompare(result);
+      if (typeof result.remaining === "number") setRemaining(result.remaining);
+      if (typeof result.max === "number") setMaxCompares(result.max);
     } catch (e) {
       showToast(lang === "ar" ? "تعذّرت المقارنة، حاول تاني" : "Comparison failed, please try again");
     } finally {
@@ -139,8 +191,48 @@ export function CompareScreen() {
           </div>
         </div>
 
+        {/* Market Fair Price (item 8) */}
+        <div className="mb-6 grid grid-cols-2 gap-3">
+          {([
+            { label: currentCompare.productA, offered: currentCompare.priceA, min: currentCompare.marketFairPriceMinA, max: currentCompare.marketFairPriceMaxA },
+            { label: currentCompare.productB, offered: currentCompare.priceB, min: currentCompare.marketFairPriceMinB, max: currentCompare.marketFairPriceMaxB },
+          ] as const).map((p, i) => {
+            const hasRange = typeof p.min === "number" && typeof p.max === "number";
+            const mid = hasRange ? (p.min! + p.max!) / 2 : null;
+            const ratio = hasRange && mid ? p.offered / mid : null;
+            // green = good deal (at/under fair mid), amber = close to fair, red = notably above fair
+            const tone = ratio === null ? "zinc" : ratio <= 1.02 ? "green" : ratio <= 1.15 ? "amber" : "red";
+            const toneClasses =
+              tone === "green" ? "border-green-500/30 bg-green-500/5 text-green-400"
+              : tone === "amber" ? "border-amber-500/30 bg-amber-500/5 text-amber-400"
+              : tone === "red" ? "border-red-500/30 bg-red-500/5 text-red-400"
+              : "border-zinc-700 bg-zinc-800/40 text-zinc-400";
+            return (
+              <div key={i} className={`rounded-xl border p-3 text-center ${toneClasses}`}>
+                <p className="mb-1 text-[11px] font-bold opacity-80">
+                  {lang === "ar" ? "السعر العادل بالسوق" : "Fair market price"}
+                </p>
+                {hasRange ? (
+                  <p className="text-sm font-bold">
+                    {p.min!.toLocaleString()} – {p.max!.toLocaleString()} {shortLabel}
+                  </p>
+                ) : (
+                  <p className="text-xs text-zinc-500">
+                    {lang === "ar" ? "غير متاح حاليًا" : "Not available right now"}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
         {/* Comparison Rows */}
         <div className="mb-6 space-y-2">
+          <p className="-mt-2 mb-1 text-center text-[11px] text-zinc-500">
+            {lang === "ar"
+              ? "الحكم على القيمة الحقيقية مقابل السعر العادل، مش على مين رقمه أصغر"
+              : "Judged by real value against the fair price, not just the smaller number"}
+          </p>
           {currentCompare.rows.map((row, i) => (
             <div key={i} className="rounded-xl border border-amber-500/15 bg-zinc-900/60 p-4">
               <p className="mb-3 text-center text-xs font-bold text-amber-400">{bilingual(row.category)}</p>
@@ -232,6 +324,14 @@ export function CompareScreen() {
         </button>
         <h1 className="font-serif text-2xl font-bold text-amber-400">{t("compareProducts")}</h1>
       </div>
+
+      {quotaLoaded && maxCompares !== null && remaining !== null && (
+        <p className="mb-4 text-center text-xs text-zinc-400">
+          {lang === "ar"
+            ? `عندك ${remaining} مقارنة فاضلة من ${maxCompares}`
+            : `You have ${remaining} of ${maxCompares} comparisons left`}
+        </p>
+      )}
 
       <div className="rounded-2xl border border-amber-500/15 bg-gradient-to-b from-zinc-900/80 to-[#0B0B0F] p-6 shadow-2xl">
         <div className="mb-6 text-center">

@@ -86,6 +86,25 @@ async function handleApprove(req: VercelRequest, res: VercelResponse) {
     return res.status(409).json({ error: "already_reviewed" });
   }
 
+  // Item 7, second layer: handleSubscribe already blocks a user from
+  // creating a new request while one is active, but that only prevents
+  // NEW requests — it doesn't retroactively stop two already-pending
+  // requests for the same user (e.g. one made just before the other was
+  // approved) from both getting approved. Check again here right before
+  // approval.
+  const { data: activeCheck } = await admin
+    .from("users")
+    .select("tier, subscription_end_date")
+    .eq("id", reqRow.user_id)
+    .single();
+  const alreadyActive =
+    activeCheck?.tier === "premium" &&
+    (!activeCheck.subscription_end_date || new Date(activeCheck.subscription_end_date) >= new Date());
+  if (alreadyActive) {
+    console.warn("[/api/admin?action=approve] User already has an active plan — refusing to stack another. user:", reqRow.user_id);
+    return res.status(409).json({ error: "already_subscribed", message: "العميل ده لسه عنده باقة شغالة حاليًا." });
+  }
+
   const planConfig = getPlanConfig(reqRow.plan);
   if (!planConfig) {
     console.error("[/api/admin?action=approve] unknown plan:", reqRow.plan);

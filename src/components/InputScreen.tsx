@@ -36,9 +36,13 @@ export function InputScreen() {
   // Chat Assistant State
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [chatMessages, setChatMessages] = useState<{
+    role: "user" | "assistant";
+    content: string;
+    productSuggestions?: { name: string; approxPrice: string; reason: string }[];
+  }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatRemaining, setChatRemaining] = useState(isPremium ? 150 : 20);
+  const [chatRemaining, setChatRemaining] = useState<number | null>(null);
   const [chatLimitHit, setChatLimitHit] = useState(false);
   const [listening, setListening] = useState(false);
   const [productVoiceListening, setProductVoiceListening] = useState(false);
@@ -121,19 +125,20 @@ export function InputScreen() {
     setListening(true);
   };
 
-  const sendChat = async () => {
-    if (!chatInput.trim() || chatLoading) return;
+  const sendChat = async (overrideText?: string) => {
+    const raw = overrideText ?? chatInput;
+    if (!raw.trim() || chatLoading) return;
     if (!session?.user) {
       showToast(lang === "ar" ? "برجاء تسجيل الدخول أولاً" : "Please login first");
       navigate("login");
       return;
     }
-    if (chatLimitHit || chatRemaining <= 0) {
+    if (chatLimitHit || (chatRemaining !== null && chatRemaining <= 0)) {
       setChatLimitHit(true);
       return;
     }
 
-    const question = chatInput.trim();
+    const question = raw.trim();
     setChatMessages((prev) => [...prev, { role: "user", content: question }]);
     setChatInput("");
     setChatLoading(true);
@@ -162,7 +167,10 @@ export function InputScreen() {
 
       const data = await res.json();
       if (data.answer) {
-        setChatMessages((prev) => [...prev, { role: "assistant", content: data.answer }]);
+        const suggestions = Array.isArray(data.productSuggestions) && data.productSuggestions.length > 0
+          ? data.productSuggestions
+          : undefined;
+        setChatMessages((prev) => [...prev, { role: "assistant", content: data.answer, productSuggestions: suggestions }]);
       } else {
         // Fallback for raw text if any (though backend should return JSON now)
         const text = typeof data === 'string' ? data : JSON.stringify(data);
@@ -178,6 +186,11 @@ export function InputScreen() {
       setChatLoading(false);
     }
   };
+
+  // Section 9: ready-made budget-suggestion prompts shown when the advisor
+  // chat is empty, so users discover the "recommend within my budget"
+  // capability instead of only ever asking free-form questions.
+  const budgetChips = [t("budgetSuggestChip1"), t("budgetSuggestChip2"), t("budgetSuggestChip3")];
 
   const localIcon = useMemo(() => getCategoryIcon(product), [product]);
   const variantChipGroups = useMemo(() => getVariantChipGroups(product), [product]);
@@ -284,6 +297,24 @@ export function InputScreen() {
     }
     fetchRemaining();
   }, [session, isPremium, deviceFingerprint]);
+
+  // Item 3: fetch the REAL advisor-chat quota from the backend instead of
+  // assuming a fixed 150 for premium — that number was never the plan's
+  // actual chat_messages_limit, just a guess baked into the initial state.
+  useEffect(() => {
+    async function fetchChatRemaining() {
+      try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+        const res = await fetch("/api/user?action=chat-remaining", { method: "POST", headers, body: "{}" });
+        const data = await res.json();
+        if (typeof data.remaining === "number") setChatRemaining(data.remaining);
+      } catch {
+        // leave as null — falls back to the disabled-until-loaded state below
+      }
+    }
+    fetchChatRemaining();
+  }, [session, isPremium]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -469,7 +500,7 @@ export function InputScreen() {
               type="number"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
-              placeholder={lang === "ar" ? "0 (أو قول السعر بالصوت)" : "0 (or say the price by voice)"}
+              placeholder={lang === "ar" ? "0" : "0"}
               className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
             />
             </div>
@@ -715,7 +746,7 @@ export function InputScreen() {
                   </span>
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] text-zinc-500">
-                      {t("chatQuestionsLeft").replace("{n}", String(chatRemaining))}
+                      {t("chatQuestionsLeft").replace("{n}", chatRemaining === null ? "…" : String(chatRemaining))}
                     </span>
                     <button onClick={() => setShowChat(false)} className="text-zinc-500 hover:text-zinc-300">
                       <X className="h-4 w-4" />
@@ -724,20 +755,63 @@ export function InputScreen() {
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {chatMessages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
-                      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300/20 to-amber-600/20 ring-1 ring-amber-500/20">
-                        <Sparkles className="h-7 w-7 text-amber-400" />
+                    <div className="flex flex-col items-center justify-center h-full text-center gap-4">
+                      <div className="opacity-60">
+                        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300/20 to-amber-600/20 ring-1 ring-amber-500/20 mx-auto">
+                          <Sparkles className="h-7 w-7 text-amber-400" />
+                        </div>
+                        <p className="text-xs text-zinc-500">{t("askAssistantHint")}</p>
                       </div>
-                      <p className="text-xs text-zinc-500">{t("askAssistantHint")}</p>
+
+                      {/* Budget-suggestion discoverability card */}
+                      <div className="w-full rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3 text-start">
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400">💰</span>
+                          <span className="text-[11px] font-bold text-amber-400">{t("budgetSuggestBadge")}</span>
+                        </div>
+                        <p className="mb-3 text-xs leading-snug text-zinc-300">{t("budgetSuggestTitle")}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {budgetChips.map((chip, i) => (
+                            <button
+                              key={i}
+                              onClick={() => sendChat(chip)}
+                              disabled={chatLoading || chatLimitHit}
+                              className="rounded-full border border-orange-400/30 bg-transparent px-3 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-amber-400 hover:bg-amber-500/10 hover:text-amber-300 disabled:opacity-50"
+                            >
+                              {chip}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     chatMessages.map((msg, i) => (
-                      <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                      <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
                         <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
                           msg.role === "user" ? "bg-amber-500 text-black font-medium" : "bg-zinc-800 text-zinc-200 border border-zinc-700"
                         }`}>
                           {msg.content}
                         </div>
+
+                        {/* Section 9: budget product suggestions, rendered as
+                            separate cards below the assistant's text reply —
+                            never inline inside the chat bubble. */}
+                        {msg.role === "assistant" && msg.productSuggestions && msg.productSuggestions.length > 0 && (
+                          <div className="mt-2 flex w-full max-w-[85%] flex-col gap-2">
+                            {msg.productSuggestions.map((s, si) => (
+                              <div key={si} className="rounded-xl border border-amber-500/25 bg-zinc-900/60 p-2.5">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold text-zinc-100">{s.name}</span>
+                                  <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-400">
+                                    {s.approxPrice}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] leading-snug text-zinc-400">{s.reason}</p>
+                              </div>
+                            ))}
+                            <p className="text-[10px] text-zinc-500">{t("productSuggestionsDisclaimer")}</p>
+                          </div>
+                        )}
                       </div>
                     ))
                   )}

@@ -279,7 +279,10 @@ function buildPrompt(opts: {
 - pros: 3-4 complete specific sentences (not short phrases).
 - cons: 2-3 complete specific sentences (not short phrases).
 - hiddenRisks: 3-4 specific, actionable items (seller verification, serial number checks, spec mismatches vs the stated usage profile).
-- Also include "negotiationScriptVariants": { "polite": {"ar":"...","en":"..."}, "firm": {"ar":"...","en":"..."} } IN ADDITION to negotiationScript.`
+- Also include "negotiationScriptVariants": { "polite": {"ar":"...","en":"..."}, "firm": {"ar":"...","en":"..."} } IN ADDITION to negotiationScript.
+  - "polite" MUST read as genuinely warm and deferential: a friendly opening greeting, indirect/softened phrasing ("would it be possible...", "I was wondering if..."), no pressure or urgency, may briefly compliment the item before asking.
+  - "firm" MUST read as direct and confident: opens straight with a specific number/offer (no small talk), no over-apologizing or hedging, assertive but still polite/respectful in tone — never rude.
+  - The two MUST differ in their opening line, sentence structure, and overall tone — not just in word choice. If they would sound interchangeable with the labels swapped, rewrite them until they clearly wouldn't.`
       : `FREE TIER DEPTH:
 - reasoningPoints: 2-3 short numbered points.
 - pros: 2-4 short bullet phrases.
@@ -888,6 +891,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Fallback: IP-based (legacy)
         const { data: row } = await admin.from("guest_usage").select("scans_used_this_month").eq("ip_address", ip).single();
         await admin.from("guest_usage").update({ scans_used_this_month: (row?.scans_used_this_month || 0) + 1 }).eq("ip_address", ip);
+      }
+    }
+
+    // ---- Item 4: auto-save premium analyses to history (regardless of the
+    // "Save" button) — mirrors the same "analyses" table/shape AppContext's
+    // client-side saveToHistory() writes, just done server-side right after
+    // a successful analysis so it's never missed. Free/guest users still
+    // rely on the manual save button in ReportScreen, unchanged. Never
+    // blocks the response if it fails — just logs it.
+    if (user && tier === "premium") {
+      try {
+        await admin.from("analyses").insert({
+          user_id: user.id,
+          product: result.product,
+          offered_price: result.offeredPrice,
+          currency: result.currency,
+          verdict: (result as any).verdict,
+          market_fair_price_min: result.marketFairPriceMin || 0,
+          market_fair_price_max: result.marketFairPriceMax || 0,
+          market_fair_price_mid: result.marketFairPriceMid || 0,
+          money_saved: result.moneySaved || 0,
+          full_report: result,
+        });
+        console.log("[/api/analyze] Auto-saved premium analysis to history for user:", user.id);
+      } catch (histErr) {
+        console.error("[/api/analyze] Auto-save to history failed (non-blocking):", histErr);
       }
     }
 

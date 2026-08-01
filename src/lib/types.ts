@@ -72,6 +72,7 @@ export interface AnalysisResult {
   finalTip: BilingualText;
   betterAlternatives: Alternative[];
   negotiationScript: BilingualText;
+  negotiationScriptVariants?: { polite: BilingualText; firm: BilingualText };
   communityInsights?: {
     analyzedCount: number;
     recentPrices: number[];
@@ -114,6 +115,10 @@ export interface CompareResult {
   resaleValueTimeframe?: string;
   warrantyScoreA?: number;
   warrantyScoreB?: number;
+  marketFairPriceMinA?: number | null;
+  marketFairPriceMaxA?: number | null;
+  marketFairPriceMinB?: number | null;
+  marketFairPriceMaxB?: number | null;
 }
 
 export interface UserProfile {
