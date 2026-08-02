@@ -27,11 +27,16 @@
 import { loggedFetch, loggedJsonParse } from "./_logger.js";
 
 // Flash-Lite has the most generous free-tier RPM/RPD of the Gemini family
-// (15 RPM / 1,000 RPD) while still sharing the same 250,000 TPM ceiling as
-// Flash — the right tradeoff for a fallback we want available as often as
-// possible. Swap to "gemini-2.5-flash" here if you need higher answer
-// quality and can accept a lower RPM budget (10 RPM / 250 RPD).
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+// while still sharing a high TPM ceiling — the right tradeoff for a
+// fallback we want available as often as possible.
+//
+// IMPORTANT: Google retires/closes older model IDs to new API keys on a
+// rolling basis (gemini-2.5-flash-lite stopped accepting new users and now
+// 404s with "no longer available to new users"). If this fallback starts
+// 404-ing again, check https://ai.google.dev/gemini-api/docs/models for
+// the current model ID and swap it in below — there is no code change
+// needed elsewhere, this is the single source of truth for the model name.
+const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 function getGeminiKey(): string {
@@ -128,7 +133,6 @@ async function callGeminiStructured(
     contents: [{ role: "user", parts: [{ text: user }] }],
     systemInstruction: { parts: [{ text: system }] },
     generationConfig: {
-      temperature: 0.2,
       maxOutputTokens,
       responseMimeType: "application/json",
       responseSchema: schema,
