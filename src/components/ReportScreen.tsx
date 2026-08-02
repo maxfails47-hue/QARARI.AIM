@@ -170,10 +170,12 @@ export function ReportScreen() {
     }
   };
 
-  const activeNegotiationText = (): { ar: string; en: string } =>
-    isPremium && report.negotiationScriptVariants
-      ? report.negotiationScriptVariants[negVariant]
-      : report.negotiationScript;
+  const activeNegotiationText = (): { ar: string; en: string } => {
+    const variant = isPremium && report.negotiationScriptVariants ? report.negotiationScriptVariants[negVariant] : null;
+    // Guard against older/cached reports where a variant exists but is
+    // empty — fall back to the base script rather than showing a blank box.
+    return variant && variant.ar ? variant : report.negotiationScript;
+  };
 
   const handleCopyNegotiation = () => {
     const text = bilingualSafe(activeNegotiationText());
@@ -464,7 +466,12 @@ export function ReportScreen() {
           <AlertTriangle className={`h-5 w-5 shrink-0 ${report.verdict === "bad" ? "text-red-400" : "text-amber-400"}`} />
           <div>
             <p className={`text-sm font-bold ${report.verdict === "bad" ? "text-red-400" : "text-amber-400"}`}>{t("beforeYouBuy")}</p>
-            <p className="mt-1 text-sm text-zinc-300">{bilingual(report.preRecommendation)}</p>
+            <p className="mt-1 text-sm text-zinc-300">
+              {bilingual(report.preRecommendation) ||
+                (lang === "ar"
+                  ? "راجع سعر السوق العادل والحالة المذكورة للمنتج بعناية قبل إتمام الشراء."
+                  : "Review the fair market price and the product's stated condition carefully before completing this purchase.")}
+            </p>
           </div>
         </div>
       </div>
@@ -475,7 +482,12 @@ export function ReportScreen() {
           <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-400">
             <TrendingUp className="h-4 w-4" /> {t("futureCompatibility")}
           </h3>
-          <p className="text-sm text-zinc-300">{bilingual(report.futureCompatibility)}</p>
+          <p className="text-sm text-zinc-300">
+            {bilingual(report.futureCompatibility) ||
+              (lang === "ar"
+                ? "معلومات التوافق المستقبلي مش متاحة لهذا المنتج حالياً."
+                : "Future compatibility info isn't available for this product right now.")}
+          </p>
         </div>
         <div className="rounded-xl border border-amber-500/15 bg-zinc-900/60 p-5">
           <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-400">

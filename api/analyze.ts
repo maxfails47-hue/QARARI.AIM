@@ -11,7 +11,6 @@ import {
   type FairPriceRange,
   type AlternativeWithLinks,
 } from "./_groq_tavily.js";
-import { wrapNoonLinks, wrapNoonLinksInAlternatives } from "./_affiliateLinks.js";
 import { logAiUsage } from "./_costTracking.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep, logEnvPresence } from "./_logger.js";
 import { FREE_TIER_LIMITS, DEFAULT_PREMIUM_LIMITS, FAIR_USE_CONFIG, getBurstLimit } from "./_planConfig.js";
@@ -164,6 +163,52 @@ function isNumberOrNull(v: unknown): v is number | null {
   return v === null || typeof v === "number";
 }
 
+// A "good"/complete AI narrative response fills preRecommendation,
+// futureCompatibility, negotiationScript, pros, cons, hiddenRisks, and
+// betterAlternatives. Occasionally the model returns a technically-valid
+// JSON object (verdict/regretLevel present) but leaves most of those
+// mandatory fields blank/empty — bilingualStrings/bilingualArrays then
+// silently normalize that to "" / [] with no error, and the report renders
+// with several empty boxes. This checks the RAW model output (before that
+// normalization hides the difference) so we can retry once instead of
+// silently accepting/caching a half-blank report.
+function isNarrativeCriticallyEmpty(raw: any): boolean {
+  const emptyStr = (v: any) => !(typeof v?.ar === "string" && v.ar.trim().length > 0);
+  const emptyArr = (v: any) => !(Array.isArray(v?.ar) && v.ar.length > 0);
+  const emptyAlternatives = !(
+    Array.isArray(raw?.betterAlternatives) &&
+    raw.betterAlternatives.some((a: any) => typeof a?.name === "string" && a.name.trim().length > 0)
+  );
+  const checks = [
+    emptyStr(raw?.preRecommendation),
+    emptyStr(raw?.futureCompatibility),
+    emptyStr(raw?.negotiationScript),
+    emptyArr(raw?.pros),
+    emptyArr(raw?.cons),
+    emptyArr(raw?.hiddenRisks),
+    emptyAlternatives,
+  ];
+  const emptyCount = checks.filter(Boolean).length;
+  return emptyCount >= 4; // majority of mandatory fields blank => something went wrong
+}
+
+async function callAnalysisModelWithRetry(prompt: string): Promise<{ data: any; modelUsed: string; usage: any }> {
+  const first = await callAnalysisModel(prompt);
+  if (!isNarrativeCriticallyEmpty(first.data)) return first;
+
+  console.warn("[/api/analyze] AI narrative response came back mostly empty (preRecommendation/futureCompatibility/negotiationScript/pros/cons/hiddenRisks/betterAlternatives) — retrying once.");
+  try {
+    const retry = await callAnalysisModel(prompt);
+    if (isNarrativeCriticallyEmpty(retry.data)) {
+      console.warn("[/api/analyze] Retry also came back mostly empty — proceeding with the retry result anyway (better than a hard failure).");
+    }
+    return retry;
+  } catch (e) {
+    console.error("[/api/analyze] Retry after empty narrative response failed — using the original (mostly empty) result:", e);
+    return first;
+  }
+}
+
 function bilingualStrings(v: any): { ar: string; en: string } {
   return {
     ar: typeof v?.ar === "string" ? v.ar : "",
@@ -217,12 +262,20 @@ function validateAndNormalizeDecision(aiOutput: any): { ok: true; data: any } | 
     negotiationScript: bilingualStrings(aiOutput.negotiationScript),
     regretLevel: ["low", "medium", "high"].includes(aiOutput.regretLevel) ? aiOutput.regretLevel : "medium",
     ...(aiOutput.negotiationScriptVariants
-      ? {
-          negotiationScriptVariants: {
-            polite: bilingualStrings(aiOutput.negotiationScriptVariants?.polite),
-            firm: bilingualStrings(aiOutput.negotiationScriptVariants?.firm),
-          },
-        }
+      ? (() => {
+          const baseScript = bilingualStrings(aiOutput.negotiationScript);
+          const politeVariant = bilingualStrings(aiOutput.negotiationScriptVariants?.polite);
+          const firmVariant = bilingualStrings(aiOutput.negotiationScriptVariants?.firm);
+          // A variant with empty ar text would render an empty negotiation
+          // box for whichever tab the user has selected — fall back to the
+          // base negotiationScript (which is always required) instead.
+          return {
+            negotiationScriptVariants: {
+              polite: politeVariant.ar ? politeVariant : baseScript,
+              firm: firmVariant.ar ? firmVariant : baseScript,
+            },
+          };
+        })()
       : {}),
     resaleValueRightNow: typeof aiOutput.resaleValueRightNow === "number" ? aiOutput.resaleValueRightNow : null,
     resaleValue2Years: typeof aiOutput.resaleValue2Years === "number" ? aiOutput.resaleValue2Years : null,
@@ -638,7 +691,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let retailerPrices: any[] = [];
       try {
         retailerPrices = await fetchMainProductRetailerLinks(searchProductName, currency, cond);
-        retailerPrices = await wrapNoonLinks(retailerPrices);
       } catch (e) {
         console.error("[/api/analyze] Building retailer search links failed (non-fatal):", e);
       }
@@ -658,7 +710,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let aiResult;
       try {
         logStep("Calling AI pipeline (narrative analysis)...");
-        aiResult = await callAnalysisModel(tempPrompt);
+        aiResult = await callAnalysisModelWithRetry(tempPrompt);
         console.log("[/api/analyze] AI pipeline succeeded. modelUsed:", aiResult.modelUsed, "| usage:", aiResult.usage);
       } catch (e: any) {
         console.error("[/api/analyze] AI pipeline failed (both primary and fallback exhausted):");
@@ -694,7 +746,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             region,
             cond
           );
-          alternativesWithPrices = await wrapNoonLinksInAlternatives(alternativesWithPrices);
         } catch (e) {
           console.error("[/api/analyze] Researching alternative prices failed (non-fatal):", e);
           alternativesWithPrices = attachSearchLinksToAlternatives(alternativesOutput, currency);
@@ -769,7 +820,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       try {
         logStep("Calling AI pipeline (dynamic analysis for this user's context)...");
-        dynamicAiResult = await callAnalysisModel(dynamicPrompt);
+        dynamicAiResult = await callAnalysisModelWithRetry(dynamicPrompt);
         console.log("[/api/analyze] Dynamic AI analysis succeeded. modelUsed:", dynamicAiResult.modelUsed);
       } catch (e: any) {
         console.error("[/api/analyze] Dynamic AI analysis failed:");

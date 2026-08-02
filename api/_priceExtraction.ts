@@ -6,7 +6,12 @@ export function isSupportedCurrency(code: string): code is SupportedCurrency {
 }
 
 const CURRENCY_PATTERNS: { code: SupportedCurrency; regex: RegExp }[] = [
-  { code: "EGP", regex: /(E£|EGP|\bL\.?E\.?\b|ج\.م|جنيه)/i },
+  // جنيه is the formal spelling, but Egyptian retail/blog listings very
+  // commonly write جنية (تاء مربوطة) or جنيها (accusative, "٢٠٠٠٠ جنيها
+  // مصريا") instead. Without matching those variants, a real EGP price like
+  // "20000 جنية" was silently dropped (currency stayed null → excluded),
+  // which was a major cause of empty market-price results for EG listings.
+  { code: "EGP", regex: /(E£|EGP|\bL\.?E\.?\b|ج\.م|جني[هة](?:ا)?)/i },
   { code: "SAR", regex: /(SAR|\bS\.?R\.?\b|ر\.س|ريال)/i },
   { code: "AED", regex: /(AED|\bDHS\b|د\.إ|درهم)/i },
   { code: "KWD", regex: /(KWD|\bK\.?D\.?\b|د\.ك|دينار)/i },
@@ -178,11 +183,13 @@ export async function computeMarketPriceRange(results: any[], targetCurrency: Su
   const max = Math.round(filtered[filtered.length - 1]);
   const mid = Math.round(calculateWeightedMedian(filtered, filteredWeights));
 
-  // Calculate confidence based on sample size
+  // Calculate confidence based on sample size. A single valid price is
+  // still real signal (e.g. a narrow variant/spec search naturally returns
+  // fewer matching listings) — it should surface as Low confidence, not be
+  // discarded outright. Only a fully empty filtered set means "no data".
   let confidence = "Low";
   if (filtered.length >= 5) confidence = "High";
   else if (filtered.length >= 2) confidence = "Medium";
-  else return null;
 
   return { 
     min, 

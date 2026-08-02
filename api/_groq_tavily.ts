@@ -416,7 +416,7 @@ export async function verifyPaymentScreenshot(imageUrl: string): Promise<Screens
   }
 }
 
-async function callGroqModel(model: string, system: string, user: string) {
+async function callGroqModel(model: string, system: string, user: string, maxTokens: number = 4096) {
   const apiKey = process.env.GROQ_API_KEY;
   const res = await loggedFetch("groq.chat", "https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -425,6 +425,7 @@ async function callGroqModel(model: string, system: string, user: string) {
       model,
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       temperature: 0.1,
+      max_tokens: maxTokens,
       response_format: { type: "json_object" },
     }),
   });
@@ -608,8 +609,16 @@ export async function classifyProductCategory(productName: string): Promise<Icon
  */
 export async function callAnalysisModel(prompt: string): Promise<{ data: any; modelUsed: string; usage: AiUsage }> {
   const systemPrompt = "You are a purchase-decision analyst. Respond with ONLY a single valid JSON object.";
+  // This schema (reasoningPoints, pros/cons/hiddenRisks, both negotiation
+  // script variants, resale info, 3-4 bilingual betterAlternatives entries)
+  // can easily run past a small default token budget on premium tier,
+  // which silently truncates the JSON mid-object — every field before the
+  // cut lands fine, but everything after (and the field being cut mid-way)
+  // is lost, and downstream code was defaulting those to "" / [] with no
+  // error. A generous explicit budget removes truncation as a cause.
+  const ANALYSIS_MAX_TOKENS = 6000;
   try {
-    const json = await callGroqModel(PRIMARY_MODEL, systemPrompt, prompt);
+    const json = await callGroqModel(PRIMARY_MODEL, systemPrompt, prompt, ANALYSIS_MAX_TOKENS);
     return {
       data: JSON.parse(json.choices[0].message.content),
       modelUsed: PRIMARY_MODEL,
@@ -621,7 +630,7 @@ export async function callAnalysisModel(prompt: string): Promise<{ data: any; mo
       },
     };
   } catch (e) {
-    const json = await callGroqModel(FALLBACK_MODEL, systemPrompt, prompt);
+    const json = await callGroqModel(FALLBACK_MODEL, systemPrompt, prompt, ANALYSIS_MAX_TOKENS);
     return {
       data: JSON.parse(json.choices[0].message.content),
       modelUsed: FALLBACK_MODEL,
@@ -700,13 +709,22 @@ After searching, respond with ONLY this JSON shape, nothing else — no markdown
     try {
       const { content, executedToolCount } = await callCompoundModel(COMPOUND_MODEL, system, user, searchSettings);
       const parsed = loggedJsonParse(`compound.price[${product}]#${attempt}`, extractJsonObject(content));
-      const min = typeof parsed?.min === "number" ? parsed.min : null;
-      const max = typeof parsed?.max === "number" ? parsed.max : null;
+      let min = typeof parsed?.min === "number" ? parsed.min : null;
+      let max = typeof parsed?.max === "number" ? parsed.max : null;
+      // Same guard as the Serper fallback: a lone min or max renders as a
+      // broken half-empty box in the UI — treat it as no signal instead.
+      if (min === null || max === null) {
+        if (min !== null || max !== null) {
+          console.warn(`[getFairPriceRangeViaCompound] "${product}": incomplete range (min=${min}, max=${max}) — discarding.`);
+        }
+        min = null;
+        max = null;
+      }
       const modelMid = typeof parsed?.mid === "number" ? parsed.mid : null;
       // Trust the model's own midpoint when it provides one; otherwise
       // fall back to computing it locally from min/max (keeps behavior
       // identical if the model happens to skip the mid field).
-      const mid = modelMid !== null ? modelMid : (min !== null && max !== null ? Math.round((min + max) / 2) : null);
+      const mid = min !== null && max !== null ? (modelMid !== null ? modelMid : Math.round((min + max) / 2)) : null;
       const summary =
         parsed?.summary && typeof parsed.summary === "object"
           ? { ar: typeof parsed.summary.ar === "string" ? parsed.summary.ar : "", en: typeof parsed.summary.en === "string" ? parsed.summary.en : "" }
@@ -735,10 +753,16 @@ After searching, respond with ONLY this JSON shape, nothing else — no markdown
  * Handed raw Serper search snippets and asked to derive the same
  * marketFairPriceMin/Max/Mid shape Compound would have produced.
  */
-export function buildSmartSerperPricingPrompt(productName: string, currency: string, serperResultsJson: string): string {
+export function buildSmartSerperPricingPrompt(productName: string, currency: string, serperResultsJson: string, specs: string = ""): string {
+  const variantLine = specs
+    ? `\nالنسخة/المواصفات المطلوبة تحديداً: "${specs}" — هذا الشرط إلزامي وليس اختيارياً.`
+    : "";
+  const variantRule = specs
+    ? `\n4. **تطابق النسخة إلزامي:** المستخدم حدد نسخة "${specs}" بالتحديد. استخرج السعر فقط من النتائج التي تذكر صراحة نفس هذه النسخة (نفس سعة التخزين/الذاكرة إلخ). تجاهل تماماً أي سعر يخص نسخة مختلفة (مثال: لو المطلوب 256GB، لازم تتجاهل تماماً أي سعر مذكور لنسخة 128GB أو 512GB حتى لو كانت النتيجة الوحيدة المتاحة). لو مفيش أي نتيجة تذكر النسخة المطلوبة بشكل صريح وواضح، أرجع marketFairPriceMin و marketFairPriceMax و marketFairPriceMid كلهم null بدل ما تخمن أو تستخدم سعر نسخة تانية.`
+    : "";
   return `
 أنت خبير تسعير ذكي جداً ومحلل سوق محترف في السوق المصري. 
-أمامك نتائج بحث حية من محرك Google (عبر Serper) لمنتج: "${productName}" بالعملة (${currency}).
+أمامك نتائج بحث حية من محرك Google (عبر Serper) لمنتج: "${productName}" بالعملة (${currency}).${variantLine}
 
 نتائج البحث كالتالي:
 ${serperResultsJson}
@@ -746,16 +770,16 @@ ${serperResultsJson}
 التعليمات الصارمة لاستخراج السعر العادل (Fair Price Range):
 1. **تصفية دقيقة:** تجاهل تماماً الإعلانات الوهمية، قطع الغيار، الإكسسوارات الرخيصة، أو الأسعار غير المنطقية (مثل 1 جنيه أو أسعار قديمة لا تعبر عن الواقع). التركيز فقط على السعر الفعلي للجهاز الجديد أو المتاح حالياً في المتاجر المذكورة (مثل أمازون، جوميا، نون، إلخ).
 2. **استخراج النطاق:** حدد بدقة ثلاثة أرقام:
-   - marketFairPriceMin: أقل سعر منطقي وموثوق في السوق حالياً.
-   - marketFairPriceMax: أعلى سعر عادل لنفس النسخة بدون مبالغة التجار.
-   - marketFairPriceMid: السعر المتوسط أو المتوقع بدقة شديدة.
-3. **الإخراج البرمجي الصارم:** أجب حصرياً بصيغة JSON نظيفة جداً ودون أي كلام إضافي بالشكل التالي:
+   - marketFairPriceMin: أقل سعر منطقي وموثوق في السوق حالياً لنفس النسخة المطلوبة.
+   - marketFairPriceMax: أعلى سعر عادل لنفس النسخة المطلوبة بدون مبالغة التجار.
+   - marketFairPriceMid: السعر المتوسط أو المتوقع بدقة شديدة لنفس النسخة المطلوبة.
+3. **الإخراج البرمجي الصارم:** أجب حصرياً بصيغة JSON نظيفة جداً ودون أي كلام إضافي، ولازم الحقول الثلاثة تكون كلها أرقام أو كلها null معاً (ممنوع تسيب واحد منهم null والباقي أرقام) بالشكل التالي:
 {
   "marketFairPriceMin": 00000,
   "marketFairPriceMax": 00000,
   "marketFairPriceMid": 00000,
   "confidenceScore": 0.95
-}
+}${variantRule}
 `;
 }
 
@@ -784,7 +808,7 @@ export async function getFairPriceRangeViaSerperFallback(
     const serperResultsJson = JSON.stringify(
       results.slice(0, 15).map((r) => ({ title: r.title, url: r.url, snippet: r.content }))
     );
-    const prompt = buildSmartSerperPricingPrompt(product, currency, serperResultsJson);
+    const prompt = buildSmartSerperPricingPrompt(product, currency, serperResultsJson, specs);
     const systemPrompt = "You are a professional Egyptian-market pricing analyst. Respond with ONLY a single valid JSON object, no prose, no markdown fences.";
 
     let json;
@@ -796,8 +820,16 @@ export async function getFairPriceRangeViaSerperFallback(
     }
 
     const parsed = loggedJsonParse(`serperFallback.price[${product}]`, extractJsonObject(json.choices[0].message.content));
-    const min = typeof parsed?.marketFairPriceMin === "number" ? parsed.marketFairPriceMin : null;
-    const max = typeof parsed?.marketFairPriceMax === "number" ? parsed.marketFairPriceMax : null;
+    let min = typeof parsed?.marketFairPriceMin === "number" ? parsed.marketFairPriceMin : null;
+    let max = typeof parsed?.marketFairPriceMax === "number" ? parsed.marketFairPriceMax : null;
+    // Defensive guard: a range is only usable if BOTH ends are present.
+    // A lone min or max (the model half-answering) would otherwise render
+    // as a broken "22000–N/A" box in the UI — treat that as no signal.
+    if (min === null || max === null) {
+      console.warn(`[getFairPriceRangeViaSerperFallback] "${product}": incomplete range (min=${min}, max=${max}) — discarding.`);
+      min = null;
+      max = null;
+    }
     const mid =
       typeof parsed?.marketFairPriceMid === "number"
         ? parsed.marketFairPriceMid
@@ -847,10 +879,10 @@ export async function getFairPriceRange(
   const searchProduct = await normalizeProductNameForSearch(product);
   try {
     const serperResult = await getFairPriceRangeViaSerperFallback(searchProduct, currency, condition, specs);
-    if (serperResult.min !== null || serperResult.max !== null) {
+    if (serperResult.min !== null && serperResult.max !== null) {
       return serperResult;
     }
-    console.warn(`[getFairPriceRange] Serper pipeline returned no usable range for "${searchProduct}" — falling back to Groq Compound.`);
+    console.warn(`[getFairPriceRange] Serper pipeline returned no usable range for "${searchProduct}"${specs ? ` (variant: ${specs})` : ""} — falling back to Groq Compound.`);
   } catch (e) {
     console.error(`[getFairPriceRange] Serper pipeline threw for "${searchProduct}" — falling back to Groq Compound:`, e);
   }
