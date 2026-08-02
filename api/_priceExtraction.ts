@@ -20,6 +20,47 @@ const CURRENCY_PATTERNS: { code: SupportedCurrency; regex: RegExp }[] = [
   { code: "USD", regex: /(US\$|USD|\$)/i },
 ];
 
+// ─── Product identity matching ───
+// Serper snippets/titles for a product page are not guaranteed to contain
+// ONLY that product's price. A single search hit can legitimately include
+// text from "Similar products" / "You may also like" / category-page
+// carousels — e.g. an Amazon listing page for "RTX 5070 Ti" whose snippet
+// also surfaces a "RTX 5090" or "RTX 4070 Ti" price from an adjacent card.
+// Without checking that the hit is actually about the requested product,
+// those unrelated prices get silently folded into the same min/max/mid
+// range — this is what produced a "fair price" range spanning an entry-
+// level card's price up to a completely different, far more expensive
+// model's price. Every significant token of the product name (model
+// number, "Ti"/"Pro"/storage size, etc.) must appear, as a whole word, in
+// the result's combined title+content before any price from it is kept.
+const TOKEN_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "with", "for", "of", "in", "on",
+  "new", "original", "international", "version", "edition",
+]);
+
+function getSignificantTokens(productName: string): string[] {
+  return Array.from(
+    new Set(
+      (productName || "")
+        .toLowerCase()
+        .split(/[^a-z0-9\u0600-\u06FF]+/i)
+        .filter((t) => t.length >= 2 && !TOKEN_STOPWORDS.has(t))
+    )
+  );
+}
+
+function matchesProduct(haystack: string, tokens: string[]): boolean {
+  if (tokens.length === 0) return true; // no product name given — don't filter
+  const lower = haystack.toLowerCase();
+  return tokens.every((t) => {
+    const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Whole-word match (word boundary on both sides) so "5070" doesn't match
+    // "45070", and "ti" doesn't match "edition"/"multi" via plain substring.
+    const re = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, "i");
+    return re.test(lower);
+  });
+}
+
 const NOISE_KEYWORDS = /accessory|cable|cover|case|screen protector|shipping|delivery|bundle|combo/i;
 // These words indicate the listing is NOT a brand-new unit. They should only
 // be rejected when the user is asking about a "new" purchase — for
@@ -72,8 +113,16 @@ function getTrustWeight(url: string): number {
   return 1;
 }
 
-export function extractPrices(text: string, title: string, url: string, condition: string): PriceHit[] {
+export function extractPrices(text: string, title: string, url: string, condition: string, productName: string = ""): PriceHit[] {
   const prices: PriceHit[] = [];
+
+  // Product-identity gate: if this result's title+content doesn't actually
+  // mention the product we're pricing (all significant tokens present as
+  // whole words), skip it entirely — don't let a "similar products" /
+  // different-model price leak into the range. See matchesProduct above.
+  const productTokens = getSignificantTokens(productName);
+  if (!matchesProduct(`${title} ${text}`, productTokens)) return prices;
+
   const normalizedText = normalizeDigits(text);
   const numRegex = /\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?/g;
   let match;
@@ -114,9 +163,10 @@ export function extractListingPrice(
   title: string,
   url: string,
   targetCurrency: SupportedCurrency,
-  condition: string = "new"
+  condition: string = "new",
+  productName: string = ""
 ): number | null {
-  const hits = extractPrices(text, title, url, condition).filter((h) => h.currency === targetCurrency);
+  const hits = extractPrices(text, title, url, condition, productName).filter((h) => h.currency === targetCurrency);
   if (hits.length === 0) return null;
   return Math.min(...hits.map((h) => h.value));
 }
@@ -146,9 +196,14 @@ function calculateWeightedMedian(values: number[], weights: number[]): number {
 }
 
 export async function computeMarketPriceRange(results: any[], targetCurrency: SupportedCurrency, prompt: string, condition: string = "new") {
+  // The caller passes `PRODUCT: <name>` as `prompt` — pull the bare name back
+  // out so extractPrices can gate out results that aren't actually about it.
+  const productMatch = prompt.match(/PRODUCT:\s*(.+)/i);
+  const productName = productMatch ? productMatch[1].trim() : "";
+
   let allPrices: PriceHit[] = [];
   for (const r of results) {
-    allPrices = allPrices.concat(extractPrices(r.content, r.title, r.url, condition));
+    allPrices = allPrices.concat(extractPrices(r.content, r.title, r.url, condition, productName));
   }
 
   if (allPrices.length === 0) return null;
