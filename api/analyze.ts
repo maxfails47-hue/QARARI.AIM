@@ -411,6 +411,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   logRequestStart(req);
   logEnvPresence({
     GROQ_API_KEY: process.env.GROQ_API_KEY,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY, // optional — Gemini fallback is skipped (not fatal) if unset
     TAVILY_API_KEY: process.env.TAVILY_API_KEY,
     SUPABASE_URL: process.env.SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,

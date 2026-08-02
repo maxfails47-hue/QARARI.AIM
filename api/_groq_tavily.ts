@@ -1,5 +1,6 @@
 import { logStep, logEnvPresence, loggedFetch, loggedJsonParse } from "./_logger.js";
 import { computeMarketPriceRange, isSupportedCurrency, type SupportedCurrency } from "./_priceExtraction.js";
+import { getFairPriceRangeViaGemini, callAnalysisModelViaGemini } from "./_gemini.js";
 
 const PRIMARY_MODEL = "openai/gpt-oss-120b";
 const FALLBACK_MODEL = "openai/gpt-oss-20b";
@@ -434,6 +435,127 @@ async function callGroqModel(model: string, system: string, user: string, maxTok
 }
 
 /**
+ * Same as callGroqModel but uses Groq's Structured Outputs
+ * (response_format: json_schema, strict: true) instead of the loose
+ * json_object mode.
+ *
+ * WHY THIS EXISTS: json_object mode only asks the model to "please output
+ * valid JSON" — it does NOT constrain generation, so a model can (and, in
+ * production, DID) emit structurally broken JSON, e.g. closing a nested
+ * object one brace too early. With a schema this deeply nested and full of
+ * repeated {"ar":[...], "en":[...]} blocks (reasoningPoints/pros/cons/
+ * hiddenRisks/negotiationScriptVariants), gpt-oss-20b in particular loses
+ * track of nesting under load. Groq then rejects the whole generation with
+ * a 400 (json_validate_failed) — after we already paid for every token of
+ * it — and the caller has nothing usable to fall back on.
+ * json_schema + strict:true uses constrained (grammar-level) decoding on
+ * Groq's side, so the output is GUARANTEED to match the schema — this
+ * failure mode becomes structurally impossible, not just less likely.
+ * Supported on both openai/gpt-oss-120b and openai/gpt-oss-20b.
+ */
+async function callGroqModelStructured(
+  model: string,
+  system: string,
+  user: string,
+  schemaName: string,
+  schema: Record<string, any>,
+  maxTokens: number = 4096
+) {
+  const apiKey = process.env.GROQ_API_KEY;
+  const res = await loggedFetch("groq.chat", "https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      temperature: 0.1,
+      max_tokens: maxTokens,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: schemaName, strict: true, schema },
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`Groq error ${res.status}`);
+  return res.json();
+}
+
+// Reusable bilingual-string / bilingual-array shapes for the analysis schema.
+const biStr = {
+  type: "object",
+  additionalProperties: false,
+  properties: { ar: { type: "string" }, en: { type: "string" } },
+  required: ["ar", "en"],
+};
+const biArr = {
+  type: "object",
+  additionalProperties: false,
+  properties: { ar: { type: "array", items: { type: "string" } }, en: { type: "array", items: { type: "string" } } },
+  required: ["ar", "en"],
+};
+
+/**
+ * Mirrors the JSON shape demanded in buildPrompt() (api/analyze.ts) exactly.
+ * negotiationScriptVariants is always present in the schema (Groq's strict
+ * mode requires every property to be listed in "required") even though the
+ * free-tier prompt doesn't ask for it — analyze.ts already defaults missing
+ * bilingual fields to "" downstream, so an empty-string pair is harmless.
+ */
+const ANALYSIS_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    verdict: { type: "string", enum: ["good", "fair", "bad"] },
+    reasoningPoints: biArr,
+    preRecommendation: biStr,
+    futureCompatibility: biStr,
+    regretLevel: { type: "string", enum: ["low", "medium", "high"] },
+    regretJustification: biStr,
+    pros: biArr,
+    cons: biArr,
+    hiddenRisks: biArr,
+    finalTip: biStr,
+    negotiationScript: biStr,
+    negotiationScriptVariants: {
+      type: "object",
+      additionalProperties: false,
+      properties: { polite: biStr, firm: biStr },
+      required: ["polite", "firm"],
+    },
+    resaleValueRightNow: { type: ["number", "null"] },
+    resaleValue2Years: { type: ["number", "null"] },
+    resaleInsight: biStr,
+    betterAlternatives: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: { name: { type: "string" }, reason: biStr, whySuitable: biStr },
+        required: ["name", "reason", "whySuitable"],
+      },
+    },
+  },
+  required: [
+    "verdict",
+    "reasoningPoints",
+    "preRecommendation",
+    "futureCompatibility",
+    "regretLevel",
+    "regretJustification",
+    "pros",
+    "cons",
+    "hiddenRisks",
+    "finalTip",
+    "negotiationScript",
+    "negotiationScriptVariants",
+    "resaleValueRightNow",
+    "resaleValue2Years",
+    "resaleInsight",
+    "betterAlternatives",
+  ],
+};
+
+/**
  * Same as callGroqModel but WITHOUT response_format: json_object.
  * Groq (like the OpenAI API it mirrors) rejects json_object mode with a 400
  * unless the literal word "json" appears somewhere in the messages — a
@@ -618,7 +740,7 @@ export async function callAnalysisModel(prompt: string): Promise<{ data: any; mo
   // error. A generous explicit budget removes truncation as a cause.
   const ANALYSIS_MAX_TOKENS = 6000;
   try {
-    const json = await callGroqModel(PRIMARY_MODEL, systemPrompt, prompt, ANALYSIS_MAX_TOKENS);
+    const json = await callGroqModelStructured(PRIMARY_MODEL, systemPrompt, prompt, "purchase_analysis", ANALYSIS_JSON_SCHEMA, ANALYSIS_MAX_TOKENS);
     return {
       data: JSON.parse(json.choices[0].message.content),
       modelUsed: PRIMARY_MODEL,
@@ -630,17 +752,34 @@ export async function callAnalysisModel(prompt: string): Promise<{ data: any; mo
       },
     };
   } catch (e) {
-    const json = await callGroqModel(FALLBACK_MODEL, systemPrompt, prompt, ANALYSIS_MAX_TOKENS);
-    return {
-      data: JSON.parse(json.choices[0].message.content),
-      modelUsed: FALLBACK_MODEL,
-      usage: {
-        promptTokens: json.usage.prompt_tokens,
-        outputTokens: json.usage.completion_tokens,
-        totalTokens: json.usage.total_tokens,
-        searchQueryCount: 0,
-      },
-    };
+    console.warn("[callAnalysisModel] Groq PRIMARY_MODEL failed, trying Groq FALLBACK_MODEL:", (e as any)?.message || e);
+    try {
+      const json = await callGroqModelStructured(FALLBACK_MODEL, systemPrompt, prompt, "purchase_analysis", ANALYSIS_JSON_SCHEMA, ANALYSIS_MAX_TOKENS);
+      return {
+        data: JSON.parse(json.choices[0].message.content),
+        modelUsed: FALLBACK_MODEL,
+        usage: {
+          promptTokens: json.usage.prompt_tokens,
+          outputTokens: json.usage.completion_tokens,
+          totalTokens: json.usage.total_tokens,
+          searchQueryCount: 0,
+        },
+      };
+    } catch (e2) {
+      // Both Groq models exhausted (rate limit / truncated-JSON / outage).
+      // Last resort: Gemini's free tier has a far higher TPM ceiling
+      // (250,000 vs Groq's ~8,000), so it's very unlikely to be rate
+      // limited at the exact same moment Groq is. Requires GEMINI_API_KEY;
+      // if that's not set, this throws and the caller's existing
+      // "both primary and fallback exhausted" error path is unchanged.
+      console.warn("[callAnalysisModel] Groq FALLBACK_MODEL also failed, trying Gemini:", (e2 as any)?.message || e2);
+      const { data, modelUsed } = await callAnalysisModelViaGemini(prompt);
+      return {
+        data,
+        modelUsed,
+        usage: { promptTokens: 0, outputTokens: 0, totalTokens: 0, searchQueryCount: 0 },
+      };
+    }
   }
 }
 
@@ -739,7 +878,22 @@ After searching, respond with ONLY this JSON shape, nothing else — no markdown
       return { min, max, mid, summary };
     } catch (e) {
       console.error(`[getFairPriceRangeViaCompound] Compound pricing failed for "${product}" on attempt ${attempt} (non-fatal):`, e);
-      if (attempt === 2) return { min: null, max: null, mid: null, summary: null };
+      // 413 (Groq's own free-tier internal search-result size cap) and 429
+      // (TPM rate limit) are not fixed by an immediate identical retry —
+      // they just burn more of the same tight per-minute token budget that
+      // the downstream analysis call still needs. Only genuinely transient
+      // errors (5xx, network) are worth a second attempt.
+      const msg = (e as any)?.message || "";
+      const isRetryable = !/Groq Compound HTTP (413|429)/.test(msg);
+      if (attempt === 2 || !isRetryable) {
+        // Groq Compound is exhausted (413 response-size cap or 429 TPM
+        // limit) — try Gemini + Google Search as a last resort before
+        // falling through to the Serper+Groq fallback pipeline upstream.
+        // Requires GEMINI_API_KEY; silently returns nulls if unset/fails,
+        // same as before this fallback existed.
+        console.warn(`[getFairPriceRangeViaCompound] "${product}": Groq Compound exhausted, trying Gemini.`);
+        return await getFairPriceRangeViaGemini(product, currency, condition, specs);
+      }
     }
   }
   return { min: null, max: null, mid: null, summary: null };
