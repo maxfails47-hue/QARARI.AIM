@@ -46,8 +46,10 @@ export function InputScreen() {
   const [chatLimitHit, setChatLimitHit] = useState(false);
   const [listening, setListening] = useState(false);
   const [productVoiceListening, setProductVoiceListening] = useState(false);
+  const [notesVoiceListening, setNotesVoiceListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   const productVoiceRef = useRef<any>(null);
+  const notesVoiceRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // ─── Voice Input for Product Name ───
@@ -94,6 +96,43 @@ export function InputScreen() {
     rec.start();
     productVoiceRef.current = rec;
     setProductVoiceListening(true);
+  };
+
+  // ─── Voice Input for Deal Details / Notes ───
+  const toggleNotesVoiceInput = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      showToast(lang === "ar" ? "المتصفح لا يدعم الإدخال الصوتي" : "Browser doesn't support voice input");
+      return;
+    }
+    if (notesVoiceListening) {
+      notesVoiceRef.current?.stop();
+      setNotesVoiceListening(false);
+      return;
+    }
+
+    const rec = new SR();
+    rec.lang = lang === "ar" ? "ar-EG" : "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+
+    rec.onresult = (e: any) => {
+      const transcript = e.results[0][0].transcript.trim();
+      if (transcript) {
+        setNotes((prev) => (prev ? prev + " " : "") + transcript);
+      }
+      showToast(lang === "ar" ? "تم إدخال تفاصيل الصفقة" : "Deal details added");
+    };
+
+    rec.onend = () => setNotesVoiceListening(false);
+    rec.onerror = (e: any) => {
+      console.warn("[Voice Input] Error:", e.error);
+      setNotesVoiceListening(false);
+    };
+
+    rec.start();
+    notesVoiceRef.current = rec;
+    setNotesVoiceListening(true);
   };
 
   // Device fingerprint — fetched once on mount and cached for the session.
@@ -527,15 +566,36 @@ export function InputScreen() {
             </div>
           </div>
 
-          {/* Notes */}
+          {/* Notes / Deal Details */}
           <div className="space-y-1.5">
             <Label className="text-sm font-medium text-zinc-300">{t("notes")}</Label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder={t("notesPlaceholder")}
-              className="min-h-[60px] border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
-            />
+            <div className="flex items-start gap-2">
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder={t("notesPlaceholder")}
+                className="min-h-[60px] flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
+              />
+              <button
+                type="button"
+                onClick={toggleNotesVoiceInput}
+                disabled={loading}
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border transition-all ${
+                  notesVoiceListening
+                    ? "border-red-500 bg-red-500/20 text-red-400 animate-pulse"
+                    : "border-zinc-700 bg-zinc-800/50 text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/10"
+                } disabled:opacity-50`}
+                title={lang === "ar" ? "ادخل تفاصيل الصفقة بالصوت" : "Voice input for deal details"}
+              >
+                <Mic className="h-5 w-5" />
+              </button>
+            </div>
+            {/* Voice input hint */}
+            {notesVoiceListening && (
+              <p className="text-[11px] text-red-400 animate-pulse">
+                {lang === "ar" ? "🎤 بتكلم دلوقتي... قول تفاصيل الصفقة" : "🎤 Listening... Say the deal details"}
+              </p>
+            )}
           </div>
 
           {/* Usage Profile */}

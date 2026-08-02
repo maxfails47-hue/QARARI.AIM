@@ -199,7 +199,7 @@ export async function normalizeProductNameForSearch(product: string): Promise<st
   try {
     const system =
       'You translate/normalize product names into the exact standard English name used on e-commerce sites (brand + model + variant, e.g. "Samsung Galaxy S24 Ultra 1TB", "iPhone 15 Pro Max 256GB"). Respond with ONLY the product name, nothing else — no quotes, no explanation, no extra words.';
-    const json = await callGroqModel(FALLBACK_MODEL, system, trimmed);
+    const json = await callGroqModelPlainText(FALLBACK_MODEL, system, trimmed);
     const normalized = json?.choices?.[0]?.message?.content?.trim();
     if (normalized && normalized.length > 0 && normalized.length < 150) {
       productNameCache.set(cacheKey, normalized);
@@ -426,6 +426,32 @@ async function callGroqModel(model: string, system: string, user: string) {
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       temperature: 0.1,
       response_format: { type: "json_object" },
+    }),
+  });
+  if (!res.ok) throw new Error(`Groq error ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Same as callGroqModel but WITHOUT response_format: json_object.
+ * Groq (like the OpenAI API it mirrors) rejects json_object mode with a 400
+ * unless the literal word "json" appears somewhere in the messages — a
+ * requirement that has nothing to do with whether the caller actually wants
+ * JSON back. callGroqModel forced json_object unconditionally, which meant
+ * any caller that just wants a plain text answer (no JSON keyword in its
+ * prompt) got a guaranteed 400 on every single call. Use this for those —
+ * e.g. normalizeProductNameForSearch, which just wants a plain product name
+ * string back, not a JSON object.
+ */
+async function callGroqModelPlainText(model: string, system: string, user: string) {
+  const apiKey = process.env.GROQ_API_KEY;
+  const res = await loggedFetch("groq.chat", "https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      temperature: 0.1,
     }),
   });
   if (!res.ok) throw new Error(`Groq error ${res.status}`);

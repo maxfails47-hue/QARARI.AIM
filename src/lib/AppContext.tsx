@@ -43,24 +43,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem("qarari-lang");
     return (saved as Language) || "ar";
   });
-  const [screen, setScreen] = useState<Screen>(() => {
-    try {
-      const raw = localStorage.getItem("qarari_current_report");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed?.report && Date.now() - parsed.savedAt < 2 * 60 * 60 * 1000) {
-          return "report";
-        }
-      }
-    } catch {
-      // ignore corrupted storage
-    }
-    return "input";
-  });
+  const [screen, setScreen] = useState<Screen>("input");
   // Restore the last-viewed report from localStorage so it survives a page
   // reload or the redirect to /login when saving — this is what fixes the
   // "report disappears if I don't sign up" bug. Reports older than 2 hours
   // are treated as stale and dropped, so this never resurrects something old.
+  // Note: this only restores the DATA — the app always opens on the input
+  // screen (see `screen` above); the person can still reach this restored
+  // report from History if they want it, but it's no longer forced on them
+  // every time they open the app.
   const [currentReport, setCurrentReportState] = useState<AnalysisResult | null>(() => {
     try {
       const raw = localStorage.getItem("qarari_current_report");

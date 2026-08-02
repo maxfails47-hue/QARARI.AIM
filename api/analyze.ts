@@ -593,6 +593,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let marketData: MarketCacheEntry | null = null;
     let modelUsed: string = "unknown";
     let aiUsage: any = null; // track AI usage even on cache miss
+    // On a cache MISS, the narrative-analysis call below (aiResult) is run
+    // with the exact same product/price/currency/notes/purpose/duration/
+    // specs/condition/tier/marketPrice inputs the "dynamic analysis" call
+    // further down would otherwise re-run with — i.e. it's the identical
+    // prompt, called twice. That used to cost double the Groq tokens per
+    // analysis (and was the direct cause of hitting Groq's per-minute token
+    // rate limit, which is what actually produced the "analysisError" some
+    // users saw despite the market-data step having succeeded). Stashing
+    // the result here lets us skip the second call entirely on cache miss.
+    let reusableAiResult: { data: any; modelUsed: string; usage: any } | null = null;
 
     const { data: cachedRow } = await admin
       .from("analysis_cache")
@@ -659,6 +669,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       modelUsed = aiResult.modelUsed;
       aiUsage = aiResult.usage;
+      // Same inputs as the "dynamic analysis" call below would use — reuse
+      // this result instead of paying for a second, near-identical call.
+      reusableAiResult = aiResult;
 
       // Build the market data to cache (product intelligence only — no decision)
       const alternativesOutput: any[] = Array.isArray(aiResult.data?.betterAlternatives)
@@ -720,41 +733,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log("Saving market data to cache... done");
     }
 
-    // ─── STEP 2: Dynamic AI Analysis (ALWAYS runs, even on cache hit) ───
-    // This is the critical part: every request generates a fresh analysis
-    // based on the cached market data + the CURRENT user's context.
-    // Even if the product is the same, if the offered price or user notes
-    // or duration or purpose change, the verdict and recommendations change.
+    // ─── STEP 2: Dynamic AI Analysis ───
+    // On a cache HIT, no decision has been generated yet for this request,
+    // so we still need this call. On a cache MISS, `reusableAiResult` above
+    // already holds the result of calling the model with these exact same
+    // inputs (product/price/currency/notes/purpose/duration/specs/
+    // condition/tier/marketPrice) — so we reuse it instead of firing a
+    // second, functionally identical call. This halves Groq token usage per
+    // new-product analysis and avoids the per-minute rate-limit errors that
+    // a second unnecessary call was causing.
     const normalizedMarket = normalizeMarketData(marketData);
 
-    const dynamicPrompt = buildPrompt({
-      product,
-      offeredPrice: Number(offeredPrice),
-      currency,
-      notes,
-      purpose,
-      duration,
-      specs,
-      condition,
-      language,
-      tier,
-      marketPrice: {
-        min: normalizedMarket.min,
-        max: normalizedMarket.max,
-        mid: normalizedMarket.mid,
-        summary: normalizedMarket.summary,
-      },
-    });
+    let dynamicAiResult: { data: any; modelUsed: string; usage: any };
+    if (reusableAiResult) {
+      dynamicAiResult = reusableAiResult;
+    } else {
+      const dynamicPrompt = buildPrompt({
+        product,
+        offeredPrice: Number(offeredPrice),
+        currency,
+        notes,
+        purpose,
+        duration,
+        specs,
+        condition,
+        language,
+        tier,
+        marketPrice: {
+          min: normalizedMarket.min,
+          max: normalizedMarket.max,
+          mid: normalizedMarket.mid,
+          summary: normalizedMarket.summary,
+        },
+      });
 
-    let dynamicAiResult;
-    try {
-      logStep("Calling AI pipeline (dynamic analysis for this user's context)...");
-      dynamicAiResult = await callAnalysisModel(dynamicPrompt);
-      console.log("[/api/analyze] Dynamic AI analysis succeeded. modelUsed:", dynamicAiResult.modelUsed);
-    } catch (e: any) {
-      console.error("[/api/analyze] Dynamic AI analysis failed:");
-      console.error(e);
-      return res.status(502).json({ error: "analysis_failed", reason: e?.message });
+      try {
+        logStep("Calling AI pipeline (dynamic analysis for this user's context)...");
+        dynamicAiResult = await callAnalysisModel(dynamicPrompt);
+        console.log("[/api/analyze] Dynamic AI analysis succeeded. modelUsed:", dynamicAiResult.modelUsed);
+      } catch (e: any) {
+        console.error("[/api/analyze] Dynamic AI analysis failed:");
+        console.error(e);
+        return res.status(502).json({ error: "analysis_failed", reason: e?.message });
+      }
     }
 
     // Validate the AI decision output
@@ -773,8 +794,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Log AI usage for the dynamic analysis call (if not already cached)
-    if (dynamicAiResult.usage) {
+    // Log AI usage for the dynamic analysis call — only when it was an
+    // actual fresh call (cache hit path). On cache miss, this is the same
+    // reusableAiResult whose usage was already logged above, so logging it
+    // again here would double-count the cost/usage for one real API call.
+    if (!reusableAiResult && dynamicAiResult.usage) {
       await logAiUsage(admin, {
         endpoint: "analyze",
         model: dynamicAiResult.modelUsed,
