@@ -7,6 +7,7 @@ import {
   attachLinksAndPricesToAlternatives,
   attachSearchLinksToAlternatives,
   getRegionForCurrency,
+  normalizeProductNameForSearch,
   type FairPriceRange,
   type AlternativeWithLinks,
 } from "./_groq_tavily.js";
@@ -581,7 +582,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Every analysis is re-generated dynamically from this cached market data
     // combined with the current user's offered price and context.
     console.log("Loading market data cache...");
-    const cacheKey = normalizeCacheKey(product, currency, condition, specs);
+    // Normalize the product name to a standard English form before it's used
+    // for search or as the cache key — see normalizeProductNameForSearch in
+    // _groq_tavily.ts. This keeps the raw `product` value (whatever the user
+    // typed, in any language) unchanged for display purposes below.
+    const searchProductName = await normalizeProductNameForSearch(product);
+    const cacheKey = normalizeCacheKey(searchProductName, currency, condition, specs);
     const cacheCutoff = new Date(Date.now() - CACHE_TTL_HOURS * 60 * 60 * 1000).toISOString();
 
     let marketData: MarketCacheEntry | null = null;
@@ -613,7 +619,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // regardless of our own request size — it falls through immediately
       // to a Serper + gpt-oss-120b pipeline instead of surfacing a failure.
       logStep("Calling fair price range pipeline (Compound, with Serper+GPT fallback)...");
-      const marketPrice: FairPriceRange = await getFairPriceRange(product, currency, cond, specs);
+      const marketPrice: FairPriceRange = await getFairPriceRange(searchProductName, currency, cond, specs);
       console.log("[/api/analyze] Fair price range:", marketPrice.min, "-", marketPrice.max, "| mid:", marketPrice.mid);
 
       // ---- STEP 1b: retailer direct listing links (Jumia/Amazon/Noon, etc.) ----
@@ -621,7 +627,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Never used for pricing.
       let retailerPrices: any[] = [];
       try {
-        retailerPrices = await fetchMainProductRetailerLinks(product, currency, cond);
+        retailerPrices = await fetchMainProductRetailerLinks(searchProductName, currency, cond);
         retailerPrices = await wrapNoonLinks(retailerPrices);
       } catch (e) {
         console.error("[/api/analyze] Building retailer search links failed (non-fatal):", e);

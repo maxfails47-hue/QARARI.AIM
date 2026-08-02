@@ -28,13 +28,20 @@ function normalizeArabic(text: string): string {
 
 const variantMap: VariantGroup[] = [
   {
-    keywords: ["phone", "iphone", "samsung", "galaxy", "pixel", "موبايل", "تليفون", "هاتف"],
+    keywords: [
+      "phone", "iphone", "samsung", "galaxy", "pixel",
+      "موبايل", "تليفون", "هاتف",
+      "سامسونج", "سامسونغ", "ايفون", "آيفون", "جالاكسي", "بيكسل",
+    ],
     chipGroups: [
       { label: { ar: "السعة", en: "Storage" }, options: ["64GB", "128GB", "256GB", "512GB", "1TB"] },
     ],
   },
   {
-    keywords: ["laptop", "macbook", "notebook", "لابتوب", "كمبيوتر محمول"],
+    keywords: [
+      "laptop", "macbook", "notebook",
+      "لابتوب", "كمبيوتر محمول", "ماك بوك", "ماكبوك",
+    ],
     chipGroups: [
       { label: { ar: "الرام", en: "RAM" }, options: ["8GB", "16GB", "32GB", "64GB"] },
       { label: { ar: "التخزين", en: "Storage" }, options: ["256GB SSD", "512GB SSD", "1TB SSD"] },
@@ -47,7 +54,10 @@ const variantMap: VariantGroup[] = [
     ],
   },
   {
-    keywords: ["console", "playstation", "ps5", "ps4", "xbox"],
+    keywords: [
+      "console", "playstation", "ps5", "ps4", "xbox",
+      "بلايستيشن", "بلاي ستيشن", "اكس بوكس", "إكس بوكس",
+    ],
     chipGroups: [
       { label: { ar: "السعة", en: "Storage" }, options: ["512GB", "825GB", "1TB", "2TB"] },
     ],
@@ -84,7 +94,7 @@ const variantMap: VariantGroup[] = [
   },
 ];
 
-export function getVariantChipGroups(productName: string): VariantGroup["chipGroups"] {
+export function getVariantChipGroups(productName: string, aiCategory?: string | null): VariantGroup["chipGroups"] {
   if (!productName || productName.trim().length === 0) return [];
   const normalized = normalizeArabic(productName);
   for (const entry of variantMap) {
@@ -92,6 +102,22 @@ export function getVariantChipGroups(productName: string): VariantGroup["chipGro
     if (normalizedKeywords.some((kw) => normalized.includes(kw))) {
       return entry.chipGroups;
     }
+  }
+  // Local keyword list found nothing — fall back to the AI-classified
+  // category (e.g. Arabic brand names/slang the static list doesn't cover).
+  if (aiCategory) {
+    const byCategory: Record<string, VariantGroup["chipGroups"]> = {
+      phone: [{ label: { ar: "السعة", en: "Storage" }, options: ["64GB", "128GB", "256GB", "512GB", "1TB"] }],
+      laptop: [
+        { label: { ar: "الرام", en: "RAM" }, options: ["8GB", "16GB", "32GB", "64GB"] },
+        { label: { ar: "التخزين", en: "Storage" }, options: ["256GB SSD", "512GB SSD", "1TB SSD"] },
+      ],
+      tv: [{ label: { ar: "المقاس", en: "Screen size" }, options: ["43\"", "50\"", "55\"", "65\"", "75\"", "85\"", "98\""] }],
+      console: [{ label: { ar: "السعة", en: "Storage" }, options: ["512GB", "825GB", "1TB", "2TB"] }],
+      watch: [{ label: { ar: "المقاس", en: "Size" }, options: ["40mm", "41mm", "44mm", "45mm", "49mm"] }],
+      camera: [{ label: { ar: "التخزين/الجسم", en: "Body/Storage" }, options: ["Body only", "with 18-55mm lens"] }],
+    };
+    if (byCategory[aiCategory]) return byCategory[aiCategory];
   }
   return [];
 }

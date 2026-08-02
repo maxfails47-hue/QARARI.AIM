@@ -295,9 +295,22 @@ export function ReportScreen() {
       return;
     }
     if (!compareProduct.trim()) return;
-    // Hand off product B to CompareScreen, which pre-fills product A / price A
-    // from currentReport and picks this up on mount.
+    // Hand off both sides explicitly: product B is what was just typed here,
+    // product A/price A/currency come from the report currently being viewed.
+    // CompareScreen consumes both one-time on mount, so a later plain visit
+    // to the compare tab (nav bar, history, etc.) starts genuinely blank
+    // instead of re-showing this report's product every time.
     sessionStorage.setItem("qarari-compare-prefill-b", compareProduct.trim());
+    if (currentReport) {
+      sessionStorage.setItem(
+        "qarari-compare-prefill-a",
+        JSON.stringify({
+          product: currentReport.product,
+          price: currentReport.offeredPrice,
+          currency: currentReport.currency,
+        })
+      );
+    }
     setShowCompareInput(false);
     setCompareProduct("");
     navigate("compare");

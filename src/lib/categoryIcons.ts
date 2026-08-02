@@ -12,8 +12,8 @@ interface IconProps {
 type IconComponent = ComponentType<IconProps>;
 
 const keywordMap: { keywords: string[]; icon: IconComponent }[] = [
-  { keywords: ["phone", "iphone", "samsung", "galaxy", "pixel", "موبايل", "تليفون", "هاتف"], icon: Smartphone },
-  { keywords: ["laptop", "macbook", "notebook", "لابتوب", "كمبيوتر"], icon: Laptop },
+  { keywords: ["phone", "iphone", "samsung", "galaxy", "pixel", "موبايل", "تليفون", "هاتف", "سامسونج", "سامسونغ", "ايفون", "آيفون", "جالاكسي", "بيكسل"], icon: Smartphone },
+  { keywords: ["laptop", "macbook", "notebook", "لابتوب", "كمبيوتر", "ماك بوك", "ماكبوك"], icon: Laptop },
   { keywords: ["watch", "ساعة"], icon: Watch },
   { keywords: ["headphone", "airpods", "earbuds", "سماعة"], icon: Headphones },
   { keywords: ["camera", "كاميرا"], icon: Camera },
@@ -21,7 +21,7 @@ const keywordMap: { keywords: string[]; icon: IconComponent }[] = [
   { keywords: ["car", "سيارة"], icon: Car },
   { keywords: ["shoe", "جزمة", "sneaker"], icon: Footprints },
   { keywords: ["bag", "شنطة"], icon: ShoppingBag },
-  { keywords: ["console", "playstation", "xbox"], icon: Gamepad2 },
+  { keywords: ["console", "playstation", "xbox", "بلايستيشن", "بلاي ستيشن", "اكس بوكس", "إكس بوكس"], icon: Gamepad2 },
 ];
 
 function normalizeArabic(text: string): string {

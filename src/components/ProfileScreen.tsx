@@ -63,12 +63,12 @@ export function ProfileScreen() {
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText("https://qarari-aia.vercel.app");
+    navigator.clipboard.writeText("https://qarari-aim.vercel.app");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const shareUrl = encodeURIComponent("https://qarari-aia.vercel.app");
+  const shareUrl = encodeURIComponent("https://qarari-aim.vercel.app");
   const shareText = encodeURIComponent(lang === "ar" ? "ساعدني في توفير فلوسي بقرارات شراء ذكية مع Qarari.AI!" : "Help me save money with smart purchase decisions using Qarari.AI!");
 
   const subEndDate = user.subscriptionEndDate
@@ -140,7 +140,7 @@ export function ProfileScreen() {
 
         <div className="relative mb-4">
           <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/50 p-2 pl-3">
-            <span className="flex-1 truncate text-xs text-zinc-500">qarari-aia.vercel.app</span>
+            <span className="flex-1 truncate text-xs text-zinc-500">qarari-aim.vercel.app</span>
             <button 
               onClick={handleCopyLink}
               className="flex h-8 items-center gap-1.5 rounded-lg bg-amber-500 px-3 text-[11px] font-bold text-[#0B0B0F] transition-all active:scale-95"

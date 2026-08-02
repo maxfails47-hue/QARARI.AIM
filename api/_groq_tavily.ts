@@ -165,6 +165,53 @@ export function getRegionForCurrency(currency: string): { gl: string; hl: string
   return CURRENCY_REGION_HINTS[currency] || { gl: "eg", hl: "ar" };
 }
 
+// ─── Product name normalization for search ───
+// Live web search (Serper and Groq Compound's own search tool) works far
+// more reliably against a standard English product name
+// ("Samsung Galaxy S24 Ultra 1TB") than a literal Arabic product string
+// ("سامسونج اس 24 الترا 1 تيرا") — retailer listings and price pages are
+// almost always indexed in English, so an Arabic query returns weak or
+// irrelevant results and the model quietly falls back to a stale guess
+// from its training data instead of a real current price. This was the
+// root cause of the same phone pricing at ~35,000 EGP (Arabic input) vs
+// ~90,000 EGP (English input, the correct current price).
+//
+// This translates/normalizes the product name to a clean, searchable
+// English name before it is ever used in a live search query or as the
+// market-data cache key — so results are consistent and accurate no
+// matter which language the user typed the product in. It is NEVER used
+// for anything shown to the user (the raw input is always what's
+// displayed) — only for search/cache purposes.
+const productNameCache = new Map<string, string>();
+
+function containsArabic(text: string): boolean {
+  return /[\u0600-\u06FF]/.test(text);
+}
+
+export async function normalizeProductNameForSearch(product: string): Promise<string> {
+  const trimmed = (product || "").trim();
+  if (!trimmed || !containsArabic(trimmed)) return trimmed; // already a searchable English/Latin name
+
+  const cacheKey = trimmed.toLowerCase();
+  const cached = productNameCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const system =
+      'You translate/normalize product names into the exact standard English name used on e-commerce sites (brand + model + variant, e.g. "Samsung Galaxy S24 Ultra 1TB", "iPhone 15 Pro Max 256GB"). Respond with ONLY the product name, nothing else — no quotes, no explanation, no extra words.';
+    const json = await callGroqModel(FALLBACK_MODEL, system, trimmed);
+    const normalized = json?.choices?.[0]?.message?.content?.trim();
+    if (normalized && normalized.length > 0 && normalized.length < 150) {
+      productNameCache.set(cacheKey, normalized);
+      console.log(`[normalizeProductNameForSearch] "${trimmed}" -> "${normalized}"`);
+      return normalized;
+    }
+  } catch (e) {
+    console.error(`[normalizeProductNameForSearch] failed for "${trimmed}" (non-fatal, using original):`, (e as any)?.message);
+  }
+  return trimmed; // fail open — never block the pipeline
+}
+
 interface SearchState {
   allResults: SerperResult[];
   searchCount: number;
@@ -752,13 +799,16 @@ export async function getFairPriceRangeViaSerperFallback(
  * Combined entry point for the main product's fair price range, and the
  * ONLY function api/analyze.ts should call for this purpose.
  *
- * 1. Try Groq Compound first (getFairPriceRangeViaCompound) — its own
- *    built-in live web search.
- * 2. If Compound throws (including the Free Tier's internal search-tool
- *    response-size limit, which surfaces as a 413 regardless of our own
- *    request size) OR comes back with no usable range at all, fall
- *    through immediately to the Serper + gpt-oss-120b smart pipeline
- *    instead of surfacing a failure or a null price to the user.
+ * Serper (which queries Google's own search index directly, restricted to
+ * the region's real retailer domains) is the PRIMARY source — it's what
+ * actually matches what shows up in a plain Google search, which is the
+ * ground truth users compare against. Groq Compound runs its own internal
+ * web search with no domain restriction and no visibility into what index
+ * it's hitting, and in practice has produced fair-price ranges far above
+ * the real market (e.g. Samsung A17 256GB: Compound said ~22,400-28,000
+ * EGP while Google itself shows ~13,690-15,560 EGP for the same phone).
+ * So Compound is now only a last-resort fallback if Serper genuinely
+ * returns nothing usable.
  */
 export async function getFairPriceRange(
   product: string,
@@ -766,16 +816,24 @@ export async function getFairPriceRange(
   condition: "new" | "likeNew" | "used",
   specs: string
 ): Promise<FairPriceRange> {
+  // Always search using a normalized/English product name — see
+  // normalizeProductNameForSearch above for why this matters.
+  const searchProduct = await normalizeProductNameForSearch(product);
   try {
-    const compoundResult = await getFairPriceRangeViaCompound(product, currency, condition, specs);
-    if (compoundResult.min !== null || compoundResult.max !== null) {
-      return compoundResult;
+    const serperResult = await getFairPriceRangeViaSerperFallback(searchProduct, currency, condition, specs);
+    if (serperResult.min !== null || serperResult.max !== null) {
+      return serperResult;
     }
-    console.warn(`[getFairPriceRange] Compound returned no usable range for "${product}" — falling back to Serper + GPT pipeline.`);
+    console.warn(`[getFairPriceRange] Serper pipeline returned no usable range for "${searchProduct}" — falling back to Groq Compound.`);
   } catch (e) {
-    console.error(`[getFairPriceRange] Compound threw for "${product}" — falling back to Serper + GPT pipeline:`, e);
+    console.error(`[getFairPriceRange] Serper pipeline threw for "${searchProduct}" — falling back to Groq Compound:`, e);
   }
-  return getFairPriceRangeViaSerperFallback(product, currency, condition, specs);
+  try {
+    return await getFairPriceRangeViaCompound(searchProduct, currency, condition, specs);
+  } catch (e) {
+    console.error(`[getFairPriceRange] Compound also threw for "${searchProduct}" — returning null range:`, e);
+    return { min: null, max: null, mid: null, summary: null };
+  }
 }
 
 export async function callAiWithFallback(
@@ -921,9 +979,10 @@ export async function fetchMainProductRetailerLinks(
   condition: "new" | "likeNew" | "used"
 ): Promise<RetailerLink[]> {
   try {
+    const searchProduct = await normalizeProductNameForSearch(product);
     const region = getRegionForCurrency(currency);
-    const results = await fetchRetailerListings(product, currency, region, condition);
-    return pickDirectRetailerLinks(results, product, currency, condition);
+    const results = await fetchRetailerListings(searchProduct, currency, region, condition);
+    return pickDirectRetailerLinks(results, searchProduct, currency, condition);
   } catch (e) {
     console.error("[fetchMainProductRetailerLinks] Serper link fetch failed (non-fatal):", e);
     return buildRetailerSearchLinks(product, currency, condition);

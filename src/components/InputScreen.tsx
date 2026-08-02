@@ -193,7 +193,6 @@ export function InputScreen() {
   const budgetChips = [t("budgetSuggestChip1"), t("budgetSuggestChip2"), t("budgetSuggestChip3")];
 
   const localIcon = useMemo(() => getCategoryIcon(product), [product]);
-  const variantChipGroups = useMemo(() => getVariantChipGroups(product), [product]);
 
   // "Smart" product icon: the local keyword match above is instant and
   // covers the common cases, but it's a fixed keyword list and misses
@@ -237,6 +236,13 @@ export function InputScreen() {
       controller.abort();
     };
   }, [product]);
+
+  // Variant chips (storage/RAM/size/etc.): local keyword match first (covers
+  // Arabic + English brand names), falling back to the same AI category used
+  // for the icon above when the product name is phrased in a way the static
+  // keyword list doesn't recognize — so chips still show up instead of
+  // silently disappearing for names typed in Arabic.
+  const variantChipGroups = useMemo(() => getVariantChipGroups(product, aiCategory), [product, aiCategory]);
 
   // Prefer the AI category only when it actually identified something
   // specific — if Groq comes back with "other" but the local keyword match

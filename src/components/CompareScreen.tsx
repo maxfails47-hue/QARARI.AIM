@@ -11,23 +11,41 @@ import {
 import { GitCompare, ChevronLeft, Crown, Check, Sparkles } from "lucide-react";
 
 export function CompareScreen() {
-  const { t, lang, dir, navigate, currentCompare, setCurrentCompare, isPremium, currentReport, showToast, session } = useApp();
-  const [productA, setProductA] = useState(currentReport?.product || "");
+  const { t, lang, dir, navigate, currentCompare, setCurrentCompare, isPremium, showToast, session } = useApp();
+  const [productA, setProductA] = useState("");
   const [productB, setProductB] = useState("");
-  const [priceA, setPriceA] = useState(currentReport ? String(currentReport.offeredPrice) : "");
+  const [priceA, setPriceA] = useState("");
   const [priceB, setPriceB] = useState("");
-  const [currency, setCurrency] = useState(currentReport?.currency || "EGP");
+  const [currency, setCurrency] = useState("EGP");
   const [loading, setLoading] = useState(false);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [maxCompares, setMaxCompares] = useState<number | null>(null);
   const [quotaLoaded, setQuotaLoaded] = useState(false);
 
-  // Pick up a product-B handoff left by ReportScreen's inline "compare with
-  // another product" box, if the person arrived here that way.
+  // Pick up a one-time handoff left by ReportScreen's inline "compare with
+  // another product" box, if the person arrived here that way — Product A
+  // comes from the report just viewed, Product B from what they typed there.
+  // This used to prefill Product A / Price A directly from currentReport on
+  // every mount, which meant those fields kept showing the same stale
+  // product/price on every later visit to this screen (e.g. via the nav bar)
+  // until the person cleared them by hand. Routing it through sessionStorage,
+  // consumed once, keeps a fresh "compare" visit genuinely blank.
   useEffect(() => {
-    const prefill = sessionStorage.getItem("qarari-compare-prefill-b");
-    if (prefill) {
-      setProductB(prefill);
+    const prefillA = sessionStorage.getItem("qarari-compare-prefill-a");
+    if (prefillA) {
+      try {
+        const { product, price, currency: cur } = JSON.parse(prefillA);
+        if (product) setProductA(product);
+        if (price !== undefined && price !== null) setPriceA(String(price));
+        if (cur) setCurrency(cur);
+      } catch {
+        // malformed handoff — ignore, leave fields blank
+      }
+      sessionStorage.removeItem("qarari-compare-prefill-a");
+    }
+    const prefillB = sessionStorage.getItem("qarari-compare-prefill-b");
+    if (prefillB) {
+      setProductB(prefillB);
       sessionStorage.removeItem("qarari-compare-prefill-b");
     }
   }, []);
