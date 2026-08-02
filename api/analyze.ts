@@ -97,6 +97,28 @@ setInterval(() => {
 const FREE_MONTHLY_LIMIT = FREE_TIER_LIMITS.scans;
 const CACHE_TTL_HOURS = 72; // how long a cached market-research result stays valid for reuse
 
+// ─── Price sanitizer for betterAlternatives text ───
+// The AI is never given verified pricing for alternative products (only the
+// main product gets a real Compound/Serper-researched fair price range),
+// so any specific number/price/percentage it writes in an alternative's
+// "reason" or "whySuitable" is fabricated — see the production report where
+// every alternative card showed a wrong invented price. The prompt now
+// explicitly forbids this, but this strips any number that slips through
+// anyway as a second line of defense, rather than relying on the model
+// alone. Matches Western digits, Arabic-Indic digits (٠-٩), thousands
+// separators, decimals, and a trailing currency/percent word if present.
+const PRICE_NUMBER_PATTERN =
+  /[\d٠-٩][\d٠-٩,.]*\s*(جنيه|جنيها|ج\.م|EGP|SAR|AED|KWD|USD|EUR|ريال|درهم|دينار|%|percent)?/gi;
+
+function stripPriceMentions(bi: { ar?: string; en?: string } | null | undefined): { ar: string; en: string } {
+  const clean = (s: unknown) =>
+    typeof s === "string"
+      ? s.replace(PRICE_NUMBER_PATTERN, "").replace(/\s{2,}/g, " ").trim()
+      : "";
+  return { ar: clean(bi?.ar), en: clean(bi?.en) };
+}
+
+
 // ─── Cache key: only product + condition + specs + currency (NOT user context) ───
 // The cache stores reusable product market intelligence — the fair price range,
 // retailer links, and alternative products with their own pricing data.
@@ -392,8 +414,8 @@ Rules:
 - resaleInsight: a bilingual text with a brief insight about the resale value of this product. E.g. in Arabic: "آبل بتحتفظ بقيمة عالية جداً في السوق، بعد سنتين ممكن تبيعه بـ 55% من سعره" and in English: "Apple retains value well in the market, after 2 years you can sell for ~55% of current price."
 - betterAlternatives (MANDATORY, always include exactly 3-4 items, never an empty array): real, currently-sold, named products (brand + model, e.g. "Samsung Galaxy S24 Ultra 256GB", not a generic category like "a cheaper phone") that are genuine alternatives to ${product} for this user's stated usage profile — a mix of (a) close competitors at a similar or lower price and (b) a notably cheaper option that still covers the stated purpose/duration.
   - "name": the alternative's plain product name/model only (no bilingual object, no price, no extra words) — it is used as-is in a live retailer search, so keep it a clean, searchable product name.
-  - "reason": one bilingual sentence on why this is a relevant alternative to compare against (price, specs, or value angle).
-  - "whySuitable": one bilingual sentence on why it fits THIS user's specific purpose/duration/notes from the usage profile above.
+  - "reason": one bilingual sentence on why this is a relevant alternative to compare against — specs or value angle ONLY. **NEVER mention any specific price, number, currency amount, or percentage of any kind** (no "10,000 EGP cheaper", no "~15% less", nothing numeric) — you have NOT been given verified pricing for these alternatives, so any number you write would be fabricated. Describe it qualitatively instead, e.g. "a more affordable option with a similar core experience" / "the previous generation at a lower price point".
+  - "whySuitable": one bilingual sentence on why it fits THIS user's specific purpose/duration/notes from the usage profile above — same rule: no prices, numbers, or currency amounts here either.
   - Never repeat ${product} itself or a different storage/color variant of the exact same model as an "alternative".
 - negotiationScript (MANDATORY DIRECTION): always write this as a message the USER (the BUYER) would send TO the merchant/seller — over WhatsApp, chat, or in person — to convince them to lower the price based on the fair market price above. It must NEVER be phrased as if the merchant/seller is the one speaking to the buyer.
 - finalTip / negotiationScript (MANDATORY PRICE-DIRECTION LOGIC): any specific target price you mention MUST be LOWER than offeredPrice (${offeredPrice} ${currency}) — never equal to or higher than it. The entire point of negotiating is paying LESS than the price on offer, so a target above offeredPrice is a contradiction and is never valid, regardless of where offeredPrice sits relative to marketFairPriceMin/Max.
@@ -731,6 +753,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? aiResult.data.betterAlternatives
             .filter((a: any) => typeof a?.name === "string" && a.name.trim().length > 0)
             .slice(0, 4)
+            .map((a: any) => ({
+              ...a,
+              reason: stripPriceMentions(a?.reason),
+              whySuitable: stripPriceMentions(a?.whySuitable),
+            }))
         : [];
       if (Array.isArray(aiResult.data?.betterAlternatives) && alternativesOutput.length === 0) {
         console.warn("[/api/analyze] Model returned betterAlternatives but all entries were malformed:", aiResult.data.betterAlternatives);
