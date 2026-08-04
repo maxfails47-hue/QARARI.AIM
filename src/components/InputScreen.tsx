@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useApp } from "@/lib/AppContext";
-import { getCategoryIcon, getIconByCategory } from "@/lib/categoryIcons";
+import { getCategoryIcon, getIconByCategory, getCategoryKey, isConditionRelevant } from "@/lib/categoryIcons";
 import { getVariantChipGroups } from "@/lib/variantChips";
 import { currencies, FREE_MONTHLY_LIMIT } from "@/lib/types";
 import { getDemoReport } from "@/lib/analysisEngine";
@@ -9,7 +9,6 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -17,15 +16,16 @@ import { Sparkles, Camera, Upload, X, Crown, GitCompare, RefreshCw, Mic, Send } 
 import { getCachedFingerprint } from "@/lib/fingerprint";
 
 export function InputScreen() {
-  const { t, lang, navigate, setCurrentReport, isPremium, session, showToast, history, saveToHistory, addToGuestHistory } = useApp();
+  const { t, lang, navigate, setCurrentReport, isPremium, session, showToast, history, saveToHistory, addToGuestHistory, setHelpSheetOpen } = useApp();
   const [product, setProduct] = useState("");
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState("EGP");
-  const [notes, setNotes] = useState("");
+
   const [purpose, setPurpose] = useState("personal");
   const [duration, setDuration] = useState("oneToTwoYears");
   const [specs, setSpecs] = useState("");
   const [condition, setCondition] = useState("new");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
   // Section 4: photo-to-autofill state — the extraction call is a
   // pre-fill suggestion only, never an auto-submit (see runPhotoExtraction).
@@ -55,10 +55,8 @@ export function InputScreen() {
   const [chatLimitHit, setChatLimitHit] = useState(false);
   const [listening, setListening] = useState(false);
   const [productVoiceListening, setProductVoiceListening] = useState(false);
-  const [notesVoiceListening, setNotesVoiceListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   const productVoiceRef = useRef<any>(null);
-  const notesVoiceRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // ─── Voice Input for Product Name ───
@@ -105,43 +103,6 @@ export function InputScreen() {
     rec.start();
     productVoiceRef.current = rec;
     setProductVoiceListening(true);
-  };
-
-  // ─── Voice Input for Deal Details / Notes ───
-  const toggleNotesVoiceInput = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      showToast(lang === "ar" ? "المتصفح لا يدعم الإدخال الصوتي" : "Browser doesn't support voice input");
-      return;
-    }
-    if (notesVoiceListening) {
-      notesVoiceRef.current?.stop();
-      setNotesVoiceListening(false);
-      return;
-    }
-
-    const rec = new SR();
-    rec.lang = lang === "ar" ? "ar-EG" : "en-US";
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
-
-    rec.onresult = (e: any) => {
-      const transcript = e.results[0][0].transcript.trim();
-      if (transcript) {
-        setNotes((prev) => (prev ? prev + " " : "") + transcript);
-      }
-      showToast(lang === "ar" ? "تم إدخال تفاصيل الصفقة" : "Deal details added");
-    };
-
-    rec.onend = () => setNotesVoiceListening(false);
-    rec.onerror = (e: any) => {
-      console.warn("[Voice Input] Error:", e.error);
-      setNotesVoiceListening(false);
-    };
-
-    rec.start();
-    notesVoiceRef.current = rec;
-    setNotesVoiceListening(true);
   };
 
   // Device fingerprint — fetched once on mount and cached for the session.
@@ -298,6 +259,14 @@ export function InputScreen() {
   // of downgrading to the generic box.
   const Icon = aiCategory && aiCategory !== "other" ? getIconByCategory(aiCategory) : localIcon;
 
+  // Whether "condition" (new/like-new/used) is worth asking about at all for
+  // this product — prefer the AI category once it resolves, fall back to
+  // the instant local keyword match before that (so it doesn't flicker in
+  // late). See categoryIcons.ts for the category list this covers.
+  const localCategoryKey = useMemo(() => getCategoryKey(product), [product]);
+  const effectiveCategoryKey = aiCategory && aiCategory !== "other" ? aiCategory : localCategoryKey;
+  const showConditionField = isConditionRelevant(effectiveCategoryKey);
+
   // Tapping a chip appends it to specs (e.g. "128GB") instead of the user
   // having to type it. Avoids adding the same value twice.
   const toggleSpecChip = (value: string) => {
@@ -436,12 +405,12 @@ export function InputScreen() {
   };
 
   const handleSubmit = async () => {
-    // Fetch the real quota from the server using fingerprint (not localStorage)
-    // This ensures the check is always server-authoritative
-    if (quotaExceeded) {
-      navigate("upgrade");
-      return;
-    }
+    // The server is the single source of truth for quota — we never block the
+    // click on the locally cached `remaining` count (it can be briefly stale
+    // right after load, e.g. before the guest fingerprint resolves). We always
+    // attempt the real analysis; if /api/analyze itself returns 403 below,
+    // that's the authoritative "quota exceeded" signal and we route to
+    // upgrade then.
     // Section 5: normalize the raw price text (Arabic-Indic digits,
     // thousands separators, "50 الف"/"1.5 مليون" shorthand, etc.) instead of
     // a plain parseFloat — see src/lib/parsePrice.ts.
@@ -468,7 +437,7 @@ export function InputScreen() {
         product: product.trim(),
         offeredPrice: parsedPrice,
         currency,
-        notes: notes.trim(),
+        notes: "",
         purpose,
         duration,
         specs: specs.trim(),
@@ -569,6 +538,68 @@ export function InputScreen() {
       {/* Form Card */}
       <div className="rounded-2xl border border-amber-500/15 bg-gradient-to-b from-zinc-900/80 to-[#0B0B0F] p-6 shadow-2xl">
         <div className="space-y-5">
+          {/* Photo Upload — the primary, fastest path. Snap a photo in the
+              shop (or of a screenshot from Amazon/Noon/etc.) and the name,
+              price, and currency below fill themselves in. */}
+          <div className="space-y-2 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-amber-400" />
+              <Label className="text-sm font-bold text-amber-400">{t("uploadPhoto")}</Label>
+              <button
+                type="button"
+                onClick={() => setHelpSheetOpen(true)}
+                aria-label={lang === "ar" ? "إزاي قراري بيشتغل؟" : "How does Qarari work?"}
+                className="flex h-5 w-5 items-center justify-center rounded-full border border-amber-500/40 text-[11px] font-bold text-amber-400 hover:bg-amber-500/10"
+              >
+                ?
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileSelect} className="hidden" />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                variant="outline"
+                className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 hover:text-amber-400"
+              >
+                <Upload className="h-4 w-4" /> {t("uploadPhoto")}
+              </Button>
+              <Button
+                onClick={() => cameraInputRef.current?.click()}
+                variant="outline"
+                className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 hover:text-amber-400"
+              >
+                <Camera className="h-4 w-4" /> {t("takePhoto")}
+              </Button>
+            </div>
+            {photo && (
+              <div className="relative inline-block">
+                <div className="relative h-20 w-20 overflow-hidden rounded-lg border border-amber-500/20">
+                  <img src={photo} alt="product" className="h-full w-full object-cover" />
+                  {extracting && (
+                    <div className="pointer-events-none absolute inset-0 overflow-hidden bg-black/10">
+                      <div className="photo-scan-line absolute inset-x-0 h-6 bg-gradient-to-b from-transparent via-amber-400/60 to-transparent" />
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    setPhoto(null);
+                    setExtracting(false);
+                    setExtractCaption(null);
+                  }}
+                  className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-lg"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+            {extractCaption && (
+              <p className="text-xs font-medium text-amber-400">{extractCaption}</p>
+            )}
+            <p className="text-xs text-zinc-500">{t("photoHelper")}</p>
+          </div>
+
           {/* Product Name with Live Icon */}
           <div className="space-y-1.5">
             <Label className="text-sm font-medium text-zinc-300">{t("productName")}</Label>
@@ -650,72 +681,22 @@ export function InputScreen() {
             </div>
           </div>
 
-          {/* Notes / Deal Details */}
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("notes")}</Label>
-            <div className="flex items-start gap-2">
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder={t("notesPlaceholder")}
-                className="min-h-[60px] flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
-              />
-              <button
-                type="button"
-                onClick={toggleNotesVoiceInput}
-                disabled={loading}
-                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border transition-all ${
-                  notesVoiceListening
-                    ? "border-red-500 bg-red-500/20 text-red-400 animate-pulse"
-                    : "border-zinc-700 bg-zinc-800/50 text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/10"
-                } disabled:opacity-50`}
-                title={lang === "ar" ? "ادخل تفاصيل الصفقة بالصوت" : "Voice input for deal details"}
-              >
-                <Mic className="h-5 w-5" />
-              </button>
+          {/* Product Condition — only shown for products where "used vs new"
+              genuinely changes the analysis (electronics-type items). For
+              something like shampoo it doesn't make sense, so we skip it
+              entirely instead of asking a question with no good answer.
+              Kept visible (not folded into the optional section) when it
+              IS relevant, since it changes HOW the AI searches — for a used
+              item it looks at resale listings (e.g. Facebook Marketplace
+              groups) instead of retail prices. */}
+          {showConditionField && (
+          <div className="space-y-1.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.03] p-3">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-sm font-medium text-zinc-200">{t("productCondition")}</Label>
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-400">
+                {lang === "ar" ? "بيغيّر طريقة البحث" : "changes the search"}
+              </span>
             </div>
-            {/* Voice input hint */}
-            {notesVoiceListening && (
-              <p className="text-[11px] text-red-400 animate-pulse">
-                {lang === "ar" ? "🎤 بتكلم دلوقتي... قول تفاصيل الصفقة" : "🎤 Listening... Say the deal details"}
-              </p>
-            )}
-          </div>
-
-          {/* Usage Profile */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium text-zinc-300">{t("purposeOfUse")}</Label>
-              <Select value={purpose} onValueChange={setPurpose}>
-                <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
-                  <SelectItem value="personal" className="focus:bg-amber-500/20 focus:text-amber-400">{t("personal")}</SelectItem>
-                  <SelectItem value="gift" className="focus:bg-amber-500/20 focus:text-amber-400">{t("gift")}</SelectItem>
-                  <SelectItem value="work" className="focus:bg-amber-500/20 focus:text-amber-400">{t("work")}</SelectItem>
-                  <SelectItem value="gaming" className="focus:bg-amber-500/20 focus:text-amber-400">{t("gaming")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium text-zinc-300">{t("expectedDuration")}</Label>
-              <Select value={duration} onValueChange={setDuration}>
-                <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
-                  <SelectItem value="lessThanYear" className="focus:bg-amber-500/20 focus:text-amber-400">{t("lessThanYear")}</SelectItem>
-                  <SelectItem value="oneToTwoYears" className="focus:bg-amber-500/20 focus:text-amber-400">{t("oneToTwoYears")}</SelectItem>
-                  <SelectItem value="threePlusYears" className="focus:bg-amber-500/20 focus:text-amber-400">{t("threePlusYears")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Product Condition */}
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("productCondition")}</Label>
             <Select value={condition} onValueChange={setCondition}>
               <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
                 <SelectValue />
@@ -726,96 +707,104 @@ export function InputScreen() {
                 <SelectItem value="used" className="focus:bg-amber-500/20 focus:text-amber-400">{t("conditionUsed")}</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-
-          {/* Other Specs */}
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("otherSpecs")}</Label>
-            <Input
-              value={product === "" ? "" : specs}
-              onChange={(e) => setSpecs(e.target.value)}
-              placeholder={lang === "ar" ? "اللون، السعة، المميزات..." : "Color, storage, features..."}
-              className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
-            />
-            {/* Quick-pick chips: tap the exact variant instead of typing it.
-                Narrows the market price range and keeps cache results precise. */}
-            {variantChipGroups.length > 0 && (
-              <div className="space-y-2 pt-1">
-                {variantChipGroups.map((group) => (
-                  <div key={group.label.en}>
-                    <p className="mb-1 text-[11px] text-zinc-500">{lang === "ar" ? group.label.ar : group.label.en}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {group.options.map((opt) => {
-                        const selected = specs.split(",").map((p) => p.trim()).includes(opt);
-                        return (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => toggleSpecChip(opt)}
-                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                              selected
-                                ? "border-amber-500 bg-amber-500/20 text-amber-400"
-                                : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-amber-500/40 hover:text-amber-400"
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {condition === "used" && (
+              <p className="text-[11px] text-amber-400">
+                {lang === "ar"
+                  ? "هنقارن السعر بأسعار الأجهزة المستعملة الفعلية (زي جروبات السوق المستعمل) مش بسعر الجديد."
+                  : "We'll compare against real resale/used-market prices, not new retail prices."}
+              </p>
             )}
           </div>
+          )}
 
-          {/* Photo Upload - Available for ALL users */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium text-zinc-300">{t("uploadPhoto")}</Label>
-            <div className="flex gap-2">
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
-              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileSelect} className="hidden" />
-              <Button
-                onClick={() => fileInputRef.current?.click()}
-                variant="outline"
-                className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 hover:text-amber-400"
-              >
-                <Upload className="h-4 w-4" /> {t("uploadPhoto")}
-              </Button>
-              <Button
-                onClick={() => cameraInputRef.current?.click()}
-                variant="outline"
-                className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 hover:text-amber-400"
-              >
-                <Camera className="h-4 w-4" /> {t("takePhoto")}
-              </Button>
-            </div>
-            {photo && (
-              <div className="relative inline-block">
-                <div className="relative h-20 w-20 overflow-hidden rounded-lg border border-amber-500/20">
-                  <img src={photo} alt="product" className="h-full w-full object-cover" />
-                  {extracting && (
-                    <div className="pointer-events-none absolute inset-0 overflow-hidden bg-black/10">
-                      <div className="photo-scan-line absolute inset-x-0 h-6 bg-gradient-to-b from-transparent via-amber-400/60 to-transparent" />
+          {/* Additional Details — collapsed by default. Purpose and expected
+              duration are genuine refinements but don't change the search
+              itself, so they don't need to block a quick "is this a fair
+              price?" check on something like shampoo. */}
+          <div className="rounded-xl border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="flex w-full items-center justify-between px-3 py-2.5 text-sm font-medium text-zinc-300"
+            >
+              <span>{t("additionalDetailsOptional")}</span>
+              <span className={`text-zinc-500 transition-transform ${showAdvanced ? "rotate-180" : ""}`}>⌄</span>
+            </button>
+            {showAdvanced && (
+              <div className="space-y-5 border-t border-zinc-800 p-3 pt-4">
+                {/* Usage Profile */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-zinc-300">{t("purposeOfUse")}</Label>
+                    <Select value={purpose} onValueChange={setPurpose}>
+                      <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
+                        <SelectItem value="personal" className="focus:bg-amber-500/20 focus:text-amber-400">{t("personal")}</SelectItem>
+                        <SelectItem value="gift" className="focus:bg-amber-500/20 focus:text-amber-400">{t("gift")}</SelectItem>
+                        <SelectItem value="work" className="focus:bg-amber-500/20 focus:text-amber-400">{t("work")}</SelectItem>
+                        <SelectItem value="gaming" className="focus:bg-amber-500/20 focus:text-amber-400">{t("gaming")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-zinc-300">{t("expectedDuration")}</Label>
+                    <Select value={duration} onValueChange={setDuration}>
+                      <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
+                        <SelectItem value="lessThanYear" className="focus:bg-amber-500/20 focus:text-amber-400">{t("lessThanYear")}</SelectItem>
+                        <SelectItem value="oneToTwoYears" className="focus:bg-amber-500/20 focus:text-amber-400">{t("oneToTwoYears")}</SelectItem>
+                        <SelectItem value="threePlusYears" className="focus:bg-amber-500/20 focus:text-amber-400">{t("threePlusYears")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Other Specs */}
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium text-zinc-300">{t("otherSpecs")}</Label>
+                  <Input
+                    value={product === "" ? "" : specs}
+                    onChange={(e) => setSpecs(e.target.value)}
+                    placeholder={lang === "ar" ? "اللون، السعة، المميزات..." : "Color, storage, features..."}
+                    className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
+                  />
+                  {/* Quick-pick chips: tap the exact variant instead of typing it.
+                      Narrows the market price range and keeps cache results precise. */}
+                  {variantChipGroups.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      {variantChipGroups.map((group) => (
+                        <div key={group.label.en}>
+                          <p className="mb-1 text-[11px] text-zinc-500">{lang === "ar" ? group.label.ar : group.label.en}</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {group.options.map((opt) => {
+                              const selected = specs.split(",").map((p) => p.trim()).includes(opt);
+                              return (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() => toggleSpecChip(opt)}
+                                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                                    selected
+                                      ? "border-amber-500 bg-amber-500/20 text-amber-400"
+                                      : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-amber-500/40 hover:text-amber-400"
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => {
-                    setPhoto(null);
-                    setExtracting(false);
-                    setExtractCaption(null);
-                  }}
-                  className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-lg"
-                >
-                  <X className="h-3 w-3" />
-                </button>
               </div>
             )}
-            {extractCaption && (
-              <p className="text-xs font-medium text-amber-400">{extractCaption}</p>
-            )}
-            <p className="text-xs text-zinc-500">{t("photoHelper")}</p>
           </div>
 
           {/* Scan Counter */}

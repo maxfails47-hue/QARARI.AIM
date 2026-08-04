@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { ShoppingBag, Scale, CheckCircle2, Sparkles } from "lucide-react";
+import { ShoppingBag, Camera, Scale, ShieldCheck, CheckCircle2, Sparkles } from "lucide-react";
 
 interface Slide {
   Icon: typeof ShoppingBag;
@@ -11,8 +11,10 @@ interface Slide {
 
 const SLIDES: Slide[] = [
   { Icon: ShoppingBag, chipKey: "onboardingSlide1Chip", headlineKey: "onboardingSlide1Headline", bodyKey: "onboardingSlide1Body" },
-  { Icon: Scale, chipKey: "onboardingSlide2Chip", headlineKey: "onboardingSlide2Headline", bodyKey: "onboardingSlide2Body" },
-  { Icon: CheckCircle2, chipKey: "onboardingSlide3Chip", headlineKey: "onboardingSlide3Headline", bodyKey: "onboardingSlide3Body" },
+  { Icon: Camera, chipKey: "onboardingSlide2Chip", headlineKey: "onboardingSlide2Headline", bodyKey: "onboardingSlide2Body" },
+  { Icon: Scale, chipKey: "onboardingSlide3Chip", headlineKey: "onboardingSlide3Headline", bodyKey: "onboardingSlide3Body" },
+  { Icon: ShieldCheck, chipKey: "onboardingSlide4Chip", headlineKey: "onboardingSlide4Headline", bodyKey: "onboardingSlide4Body" },
+  { Icon: CheckCircle2, chipKey: "onboardingSlide5Chip", headlineKey: "onboardingSlide5Headline", bodyKey: "onboardingSlide5Body" },
 ];
 
 export function OnboardingScreen() {
