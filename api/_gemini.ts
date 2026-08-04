@@ -269,7 +269,7 @@ export async function extractListingFromImage(
     ],
     systemInstruction: { parts: [{ text: system }] },
     generationConfig: {
-      maxOutputTokens: 256,
+      maxOutputTokens: 1024,
       responseMimeType: "application/json",
       responseSchema: GEMINI_EXTRACT_SCHEMA,
     },
