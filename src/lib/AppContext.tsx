@@ -34,6 +34,17 @@ interface AppContextType {
   pendingAction: (() => void) | null;
   setPendingAction: (a: (() => void) | null) => void;
   requireAuth: (action: () => void) => void;
+  // First-run onboarding (Section 1): shown once before InputScreen, then
+  // gated behind a localStorage flag. Exposed on context so ProfileScreen
+  // (or any other screen) can offer a "Replay intro" action for QA/marketing.
+  onboardingVisible: boolean;
+  completeOnboarding: () => void;
+  replayOnboarding: () => void;
+  // Persistent "How it works" help sheet (Section 2) — a single piece of
+  // shared UI state so the floating "؟" button in the app shell and any
+  // screen can open/close it.
+  helpSheetOpen: boolean;
+  setHelpSheetOpen: (open: boolean) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -92,6 +103,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [onboardingVisible, setOnboardingVisible] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("qarari_onboarded") !== "true";
+    } catch {
+      return true;
+    }
+  });
+  const [helpSheetOpen, setHelpSheetOpen] = useState(false);
 
   const dir = lang === "ar" ? "rtl" : "ltr";
 
@@ -117,6 +136,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setScreen(s);
     window.scrollTo(0, 0);
   }, []);
+
+  const completeOnboarding = useCallback(() => {
+    try {
+      localStorage.setItem("qarari_onboarded", "true");
+    } catch {
+      // ignore quota/private-mode errors — worst case onboarding replays once more
+    }
+    setOnboardingVisible(false);
+  }, []);
+
+  const replayOnboarding = useCallback(() => {
+    setOnboardingVisible(true);
+    navigate("input");
+  }, [navigate]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -324,6 +357,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast, toast,
       pendingAction, setPendingAction,
       requireAuth,
+      onboardingVisible, completeOnboarding, replayOnboarding,
+      helpSheetOpen, setHelpSheetOpen,
     }}>
       {children}
     </AppContext.Provider>

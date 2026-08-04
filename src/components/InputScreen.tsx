@@ -4,6 +4,7 @@ import { getCategoryIcon, getIconByCategory } from "@/lib/categoryIcons";
 import { getVariantChipGroups } from "@/lib/variantChips";
 import { currencies, FREE_MONTHLY_LIMIT } from "@/lib/types";
 import { getDemoReport } from "@/lib/analysisEngine";
+import { parsePrice } from "@/lib/parsePrice";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,14 @@ export function InputScreen() {
   const [specs, setSpecs] = useState("");
   const [condition, setCondition] = useState("new");
   const [photo, setPhoto] = useState<string | null>(null);
+  // Section 4: photo-to-autofill state — the extraction call is a
+  // pre-fill suggestion only, never an auto-submit (see runPhotoExtraction).
+  const [extracting, setExtracting] = useState(false);
+  const [extractCaption, setExtractCaption] = useState<string | null>(null);
+  const [highlightProduct, setHighlightProduct] = useState(false);
+  const [highlightPrice, setHighlightPrice] = useState(false);
+  // Section 5: inline hint shown when the typed price can't be parsed.
+  const [priceHint, setPriceHint] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
@@ -361,11 +370,66 @@ export function InputScreen() {
     fetchChatRemaining();
   }, [session, isPremium]);
 
+  // Section 4: fire the lightweight, extraction-only call and pre-fill the
+  // form. This NEVER submits an analysis by itself — the person always
+  // still sees (and can edit) whatever gets filled in before tapping
+  // "حلّل القرار", which still runs its own normal validation.
+  const runPhotoExtraction = async (dataUrl: string) => {
+    setExtracting(true);
+    setExtractCaption(t("extractReadingPhoto"));
+    try {
+      const [meta, data] = dataUrl.split(",");
+      const mimeType = meta.match(/data:(.*);base64/)?.[1] || "image/jpeg";
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: { data, mimeType } }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) throw new Error("extract_failed");
+      const result = await res.json();
+
+      if (result.productName) {
+        setProduct(result.productName);
+        setHighlightProduct(true);
+        setTimeout(() => setHighlightProduct(false), 2500);
+      }
+      if (typeof result.price === "number" && result.price > 0) {
+        setPrice(String(result.price));
+        setHighlightPrice(true);
+        setTimeout(() => setHighlightPrice(false), 2500);
+        setExtractCaption(t("extractReadFromPhoto"));
+      } else {
+        // Never fabricate a price — leave it empty and say so plainly.
+        setExtractCaption(t("extractNoPriceFound"));
+      }
+      if (result.currency && currencies.some((c) => c.code === result.currency)) {
+        setCurrency(result.currency);
+      }
+    } catch {
+      // Extraction failing is never blocking — just stop the animation and
+      // let the person fill the form manually.
+      setExtractCaption(t("extractFailed"));
+    } finally {
+      setExtracting(false);
+      setTimeout(() => setExtractCaption(null), 4000);
+    }
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = () => setPhoto(reader.result as string);
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setPhoto(dataUrl);
+        runPhotoExtraction(dataUrl);
+      };
       reader.readAsDataURL(file);
     }
     e.target.value = "";
@@ -378,14 +442,16 @@ export function InputScreen() {
       navigate("upgrade");
       return;
     }
-    if (quotaExceeded) {
-      navigate("upgrade");
-      return;
-    }
-    if (!product.trim() || !price.trim()) {
+    // Section 5: normalize the raw price text (Arabic-Indic digits,
+    // thousands separators, "50 الف"/"1.5 مليون" shorthand, etc.) instead of
+    // a plain parseFloat — see src/lib/parsePrice.ts.
+    const parsedPrice = parsePrice(price);
+    if (!product.trim() || parsedPrice === null || parsedPrice <= 0) {
+      setPriceHint(parsedPrice === null || parsedPrice <= 0);
       showToast(lang === "ar" ? "اكتب اسم المنتج والسعر" : "Enter product name and price");
       return;
     }
+    setPriceHint(false);
     setLoading(true);
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -400,7 +466,7 @@ export function InputScreen() {
 
       const body: Record<string, any> = {
         product: product.trim(),
-        offeredPrice: parseFloat(price),
+        offeredPrice: parsedPrice,
         currency,
         notes: notes.trim(),
         purpose,
@@ -441,7 +507,9 @@ export function InputScreen() {
       // navigate away without creating an account.
       if (!session?.user) addToGuestHistory(result);
       setRemaining((r) => (r !== null ? Math.max(0, r - 1) : r));
-      navigate("report");
+      // The animated, shareable "reveal" moment now sits between submit and
+      // the full report — see RevealScreen.tsx.
+      navigate("reveal");
     } catch {
       showToast(lang === "ar" ? "تعذر الاتصال بالخادم" : "Couldn't reach the server");
     } finally {
@@ -513,7 +581,7 @@ export function InputScreen() {
                 value={product}
                 onChange={(e) => setProduct(e.target.value)}
                 placeholder={t("productNamePlaceholder")}
-                className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
+                className={`flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${highlightProduct ? "field-autofill-glow" : ""}`}
               />
               <button
                 type="button"
@@ -535,6 +603,9 @@ export function InputScreen() {
                 {lang === "ar" ? "🎤 بتكلم دلوقتي... قول اسم المنتج والسعر (مثال: \"آيفون 15 سعره 35000\")" : "🎤 Listening... Say the product name and price (e.g., \"iPhone 15 price 35000\")"}
               </p>
             )}
+            {highlightProduct && (
+              <p className="text-[11px] text-amber-400">{t("extractReadFromPhoto")}</p>
+            )}
           </div>
 
           {/* Price + Currency */}
@@ -542,12 +613,25 @@ export function InputScreen() {
           <div className="space-y-1.5">
             <Label className="text-sm font-medium text-zinc-300">{t("offeredPrice")}</Label>
             <Input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              placeholder={lang === "ar" ? "0" : "0"}
-              className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
+              onChange={(e) => {
+                setPrice(e.target.value);
+                if (priceHint) setPriceHint(false);
+              }}
+              onBlur={() => {
+                if (price.trim() && parsePrice(price) === null) setPriceHint(true);
+              }}
+              placeholder={t("pricePlaceholderHint")}
+              className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${highlightPrice ? "field-autofill-glow" : ""}`}
             />
+            {priceHint && (
+              <p className="text-[11px] text-amber-400">{t("priceParseHint")}</p>
+            )}
+            {highlightPrice && !priceHint && (
+              <p className="text-[11px] text-amber-400">{t("extractReadFromPhoto")}</p>
+            )}
             </div>
             <div className="space-y-1.5">
               <Label className="text-sm font-medium text-zinc-300">{t("currency")}</Label>
@@ -708,14 +792,28 @@ export function InputScreen() {
             </div>
             {photo && (
               <div className="relative inline-block">
-                <img src={photo} alt="product" className="h-20 w-20 rounded-lg border border-amber-500/20 object-cover" />
+                <div className="relative h-20 w-20 overflow-hidden rounded-lg border border-amber-500/20">
+                  <img src={photo} alt="product" className="h-full w-full object-cover" />
+                  {extracting && (
+                    <div className="pointer-events-none absolute inset-0 overflow-hidden bg-black/10">
+                      <div className="photo-scan-line absolute inset-x-0 h-6 bg-gradient-to-b from-transparent via-amber-400/60 to-transparent" />
+                    </div>
+                  )}
+                </div>
                 <button
-                  onClick={() => setPhoto(null)}
+                  onClick={() => {
+                    setPhoto(null);
+                    setExtracting(false);
+                    setExtractCaption(null);
+                  }}
                   className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-lg"
                 >
                   <X className="h-3 w-3" />
                 </button>
               </div>
+            )}
+            {extractCaption && (
+              <p className="text-xs font-medium text-amber-400">{extractCaption}</p>
             )}
             <p className="text-xs text-zinc-500">{t("photoHelper")}</p>
           </div>

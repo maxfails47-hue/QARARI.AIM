@@ -216,6 +216,79 @@ Respond with ONLY this JSON shape:
   }
 }
 
+const GEMINI_EXTRACT_SCHEMA = {
+  type: "object",
+  properties: {
+    productName: { type: "string", nullable: true },
+    price: { type: "number", nullable: true },
+    currency: { type: "string", nullable: true },
+  },
+  required: ["productName", "price", "currency"],
+};
+
+/**
+ * Section 4 (photo-to-autofill): a lightweight, EXTRACTION-ONLY vision call —
+ * no verdict, no market lookup, no quota consumed. Reads a photo of a
+ * product/listing and pulls out just { productName, price, currency } so
+ * InputScreen can pre-fill the form for the person to review/edit. Never
+ * used to auto-submit a full analysis — see api/extract.ts.
+ *
+ * Deliberately its own tiny prompt/schema (not GEMINI_ANALYSIS_SCHEMA)
+ * since this call should be as fast and cheap as possible: it runs the
+ * instant a photo is picked, before the person has done anything else.
+ */
+export async function extractListingFromImage(
+  imageBase64: { data: string; mimeType: string }
+): Promise<{ productName: string | null; price: number | null; currency: string | null }> {
+  const apiKey = getGeminiKey();
+  const system =
+    "You extract product-listing details from a photo (a screenshot of an online listing, a price tag, or a product photo). " +
+    "Respond with ONLY a single JSON object matching the given schema — no prose, no markdown. " +
+    "If the product name isn't visible or identifiable, return null for productName. " +
+    "If no price is visible in the image, return null for price — never guess or invent one. " +
+    "If a currency symbol/code is visible (e.g. EGP, ج.م, SAR, $, ريال), return its 3-letter code (EGP, USD, SAR, AED, EUR, KWD); otherwise return null.";
+  const user = "Extract the product name, price, and currency from this photo.";
+
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: user },
+          { inline_data: { mime_type: imageBase64.mimeType, data: imageBase64.data } },
+        ],
+      },
+    ],
+    systemInstruction: { parts: [{ text: system }] },
+    generationConfig: {
+      maxOutputTokens: 256,
+      responseMimeType: "application/json",
+      responseSchema: GEMINI_EXTRACT_SCHEMA,
+    },
+  };
+
+  const res = await loggedFetch(
+    "gemini.extractListing",
+    `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) throw new Error(`Gemini error ${res.status}`);
+  const json = await res.json();
+  const text = json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("") || "";
+  if (!text) throw new Error("Gemini returned empty content");
+
+  const parsed = loggedJsonParse("gemini.extractListing.parse", extractJsonObject(text));
+  return {
+    productName: typeof parsed?.productName === "string" && parsed.productName.trim() ? parsed.productName.trim() : null,
+    price: typeof parsed?.price === "number" && parsed.price > 0 ? parsed.price : null,
+    currency: typeof parsed?.currency === "string" && parsed.currency.trim() ? parsed.currency.trim().toUpperCase() : null,
+  };
+}
+
 /**
  * Last-resort narrative-analysis call via Gemini structured output.
  * Called only after both PRIMARY_MODEL and FALLBACK_MODEL on Groq have

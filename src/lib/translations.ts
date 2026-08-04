@@ -207,6 +207,52 @@ export const translations: Record<Language, Record<string, string>> = {
     installIosStep2: "ثم اختر \"إضافة إلى الشاشة الرئيسية\"",
     installHeaderHint: "ثبّت تطبيق قراري على شاشتك الرئيسية",
     installManualHint: "افتح قائمة المتصفح (⋮) بالأعلى واختر \"تثبيت التطبيق\" أو \"إضافة إلى الشاشة الرئيسية\"",
+
+    // ─── Section 1: First-run onboarding ───
+    onboardingSkip: "تخطي",
+    onboardingNext: "التالي",
+    onboardingStart: "ابدأ الآن",
+    onboardingSlide1Chip: "؟ يستاهل السعر ده",
+    onboardingSlide1Headline: "هتشتري حاجة؟\nاسأل قراري الأول",
+    onboardingSlide1Body: "قبل ما تدفع، وصف المنتج بالسعر اللي عرضوه عليك — وسيبنا نقولك لو ده قرار صح ولا لأ.",
+    onboardingSlide2Chip: "٥٣,٠٠٠ - ٦٣,٠٠٠",
+    onboardingSlide2Headline: "بنقارنه بسعر السوق\nالحقيقي دلوقتي",
+    onboardingSlide2Body: "مش تخمين — بنجيب أسعار حية من السوق ونوريك السعر العادل، وفين واقع السعر اللي اتعرض عليك بالظبط.",
+    onboardingSlide3Chip: "وفّرت ٥,٥٠٠ ج.م",
+    onboardingSlide3Headline: "وهتاخد قرار واضح\nفي أقل من دقيقة",
+    onboardingSlide3Body: "'صفقة جيدة' ولا 'خسّرت' — بالسبب. ولو لسه محتار، مساعدنا الذكي جاهز يرد على أي سؤال.",
+
+    // ─── Section 2: Persistent "How it works" help sheet ───
+    helpButtonLabel: "طريقة الاستخدام",
+    helpSheetTitle: "قراري بيشتغل إزاي",
+    helpStep1: "١. وصف المنتج والسعر اللي اتعرض عليك.",
+    helpStep2: "٢. بنقارنه بسعر السوق الحقيقي والحي.",
+    helpStep3: "٣. تاخد قرار واضح — صفقة جيدة ولا لأ — بالأسباب.",
+    helpGotIt: "تمام",
+    replayIntro: "أعد عرض المقدمة",
+
+    // ─── Section 3: Animated reveal screen ───
+    revealFairPriceFrom: "السعر العادل يبدأ من",
+    revealSavedAmount: "وفّرت",
+    revealOverpaidAmount: "دفعت زيادة",
+    revealLockedTitle: "التحليل الكامل جاهز",
+    revealLockedDesc: "نطاق سعر السوق، روابط المتاجر، والأسباب الكاملة للقرار.",
+    revealSeeFullAnalysis: "شوف التحليل الكامل",
+    revealShare: "شارك",
+    revealLockedLine1: "نطاق سعر السوق",
+    revealLockedLine2: "أفضل روابط المتاجر",
+    revealLockedLine3: "الأسباب الكاملة للقرار",
+    revealNotGoodDeal: "قرار مش موزون",
+
+    // ─── Section 4: Photo-to-autofill ───
+    extractReadingPhoto: "بنقرا التفاصيل من الصورة...",
+    extractReadFromPhoto: "🔍 اتقرت من الصورة — تقدر تعدّلها",
+    extractNoPriceFound: "معرفناش نلاقي السعر في الصورة، اكتبه يدوي",
+    extractFailed: "معرفناش نقرا الصورة — تقدر تكمل البيانات يدوي",
+
+    // ─── Section 5: Price input normalization ───
+    pricePlaceholderHint: "مثال: 50000 أو 50 الف",
+    priceParseHint: "اكتب السعر بالأرقام: 50000 أو 50 الف",
   },
   en: {
     appName: "Qarari.AI",
@@ -414,5 +460,51 @@ export const translations: Record<Language, Record<string, string>> = {
     installIosStep2: "Then choose \"Add to Home Screen\"",
     installHeaderHint: "Install the Qarari app on your home screen",
     installManualHint: "Open the browser menu (⋮) at the top and choose \"Install app\" or \"Add to Home screen\"",
+
+    // ─── Section 1: First-run onboarding ───
+    onboardingSkip: "Skip",
+    onboardingNext: "Next",
+    onboardingStart: "Start now",
+    onboardingSlide1Chip: "Is this price worth it?",
+    onboardingSlide1Headline: "Buying something?\nAsk Qarari first",
+    onboardingSlide1Body: "Before you pay, describe the product and the price you were offered — and let us tell you if it's the right call or not.",
+    onboardingSlide2Chip: "53,000 - 63,000",
+    onboardingSlide2Headline: "We compare it to the\nreal market price right now",
+    onboardingSlide2Body: "Not a guess — we pull live prices from the market and show you the fair price, and exactly where the price you were offered lands.",
+    onboardingSlide3Chip: "Saved 5,500 EGP",
+    onboardingSlide3Headline: "And you'll get a clear\ndecision in under a minute",
+    onboardingSlide3Body: "\"Good deal\" or \"you lost\" — with the reasons why. And if you're still unsure, our AI assistant is ready to answer any question.",
+
+    // ─── Section 2: Persistent "How it works" help sheet ───
+    helpButtonLabel: "How it works",
+    helpSheetTitle: "How Qarari works",
+    helpStep1: "1. Describe the product and the price you were offered.",
+    helpStep2: "2. We compare it to the real, live market price.",
+    helpStep3: "3. You get a clear verdict — good deal or not — with reasons.",
+    helpGotIt: "Got it",
+    replayIntro: "Replay intro",
+
+    // ─── Section 3: Animated reveal screen ───
+    revealFairPriceFrom: "Fair price starts from",
+    revealSavedAmount: "You saved",
+    revealOverpaidAmount: "Overpaid by",
+    revealLockedTitle: "Full analysis is ready",
+    revealLockedDesc: "Market price range, retailer links, and the full reasoning behind this verdict.",
+    revealSeeFullAnalysis: "See full analysis",
+    revealShare: "Share",
+    revealLockedLine1: "Market price range",
+    revealLockedLine2: "Best retailer links",
+    revealLockedLine3: "Full verdict reasoning",
+    revealNotGoodDeal: "Not a good deal",
+
+    // ─── Section 4: Photo-to-autofill ───
+    extractReadingPhoto: "Reading details from the photo...",
+    extractReadFromPhoto: "🔍 Read from photo — you can edit it",
+    extractNoPriceFound: "Couldn't find a price in this photo — enter it manually",
+    extractFailed: "Couldn't read the photo — you can fill the form manually",
+
+    // ─── Section 5: Price input normalization ───
+    pricePlaceholderHint: "e.g. 50000 or 50k",
+    priceParseHint: "Enter the price in numbers: 50000 or 50k",
   },
 };

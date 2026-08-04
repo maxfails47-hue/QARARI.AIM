@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useApp } from "@/lib/AppContext";
 import { getCategoryIcon } from "@/lib/categoryIcons";
 import { currencies } from "@/lib/types";
+import { parsePrice } from "@/lib/parsePrice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -115,7 +116,12 @@ export function CompareScreen() {
   }
 
   const handleCompare = async () => {
-    if (!productA.trim() || !productB.trim() || !priceA || !priceB) {
+    // Section 5: same Arabic-Indic/thousands-separator/word-shorthand
+    // normalization as the main InputScreen price field — see
+    // src/lib/parsePrice.ts.
+    const parsedPriceA = parsePrice(priceA);
+    const parsedPriceB = parsePrice(priceB);
+    if (!productA.trim() || !productB.trim() || parsedPriceA === null || parsedPriceA <= 0 || parsedPriceB === null || parsedPriceB <= 0) {
       showToast(lang === "ar" ? "اكتب اسم المنتجين والسعرين" : "Enter both products and prices");
       return;
     }
@@ -130,8 +136,8 @@ export function CompareScreen() {
         body: JSON.stringify({
           productA: productA.trim(),
           productB: productB.trim(),
-          priceA: parseFloat(priceA),
-          priceB: parseFloat(priceB),
+          priceA: parsedPriceA,
+          priceB: parsedPriceB,
           currency,
         }),
       });
@@ -370,10 +376,11 @@ export function CompareScreen() {
               className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
             />
             <Input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={priceA}
               onChange={(e) => setPriceA(e.target.value)}
-              placeholder={t("offeredPrice")}
+              placeholder={t("pricePlaceholderHint")}
               className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
             />
           </div>
@@ -395,10 +402,11 @@ export function CompareScreen() {
               className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
             />
             <Input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={priceB}
               onChange={(e) => setPriceB(e.target.value)}
-              placeholder={t("offeredPrice")}
+              placeholder={t("pricePlaceholderHint")}
               className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
             />
           </div>

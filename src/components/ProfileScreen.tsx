@@ -4,11 +4,11 @@ import { currencies, FREE_MONTHLY_LIMIT } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   User, Mail, Phone, MapPin, LogOut, Share2, CheckCircle2,
-  Crown, Zap, Send, ChevronLeft, Copy
+  Crown, Zap, Send, ChevronLeft, Copy, Sparkles
 } from "lucide-react";
 
 export function ProfileScreen() {
-  const { t, lang, dir, user, signOut, navigate, isPremium, session, authLoading } = useApp();
+  const { t, lang, dir, user, signOut, navigate, isPremium, session, authLoading, replayOnboarding } = useApp();
   const [scansUsed, setScansUsed] = useState(0);
   const [scansMax, setScansMax] = useState(FREE_MONTHLY_LIMIT);
   const [copied, setCopied] = useState(false);
@@ -247,6 +247,13 @@ export function ProfileScreen() {
             <Send className="h-4 w-4" /> {t("supportTelegram")}
           </a>
         </div>
+        {/* QA/marketing: re-run the first-run onboarding sequence on demand */}
+        <button
+          onClick={replayOnboarding}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-sm font-medium text-amber-400 transition-colors hover:bg-amber-500/10"
+        >
+          <Sparkles className="h-4 w-4" /> {t("replayIntro")}
+        </button>
       </div>
 
       {/* Logout */}
