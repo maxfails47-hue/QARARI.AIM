@@ -96,6 +96,16 @@ html[dir="rtl"] body {
   animation: fieldGlowPulse 1.2s ease-out 2;
 }
 
+/* ─── InputScreen: soft attention pulse on the inline "How it works" pill,
+     so it reads as an actionable hint rather than a decorative "?" glyph ─── */
+@keyframes helpPulseAttn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(212, 175, 55, 0); }
+}
+.help-pulse-attn {
+  animation: helpPulseAttn 2.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .onboarding-ring,
   .onboarding-icon-float,
@@ -104,7 +114,8 @@ html[dir="rtl"] body {
   .reveal-fade-rise,
   .reveal-cta-shine,
   .photo-scan-line,
-  .field-autofill-glow {
+  .field-autofill-glow,
+  .help-pulse-attn {
     animation: none !important;
   }
 }

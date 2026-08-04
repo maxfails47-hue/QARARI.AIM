@@ -57,11 +57,15 @@ function ScreenRouter() {
 // near the bottom of the shell, available on the core screens; hidden on
 // auth/upgrade flows where it would just be noise.
 function HelpFab() {
-  const { screen, helpSheetOpen, setHelpSheetOpen, t } = useApp();
+  const { screen, helpSheetOpen, replayOnboarding, t } = useApp();
   if (screen === "login" || screen === "upgrade") return null;
   return (
     <button
-      onClick={() => setHelpSheetOpen(true)}
+      // Replays the full 5-slide onboarding (Section 1) — this is now the
+      // "about / how everything works" reference for the whole app, not
+      // just the old 3-step summary. The small "?" next to the photo
+      // upload field still opens the quick HelpSheet inline.
+      onClick={() => replayOnboarding()}
       aria-label={t("helpButtonLabel")}
       title={t("helpButtonLabel")}
       className={`fixed bottom-5 z-30 flex h-11 w-11 items-center justify-center rounded-full border-2 border-amber-500/60 bg-[#0B0B0F] text-amber-400 shadow-lg shadow-black/40 transition-transform hover:scale-105 active:scale-95 ltr:right-5 rtl:left-5 ${

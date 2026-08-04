@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Camera, Upload, X, Crown, GitCompare, RefreshCw, Mic, Send } from "lucide-react";
+import { Sparkles, Camera, Upload, X, Crown, GitCompare, RefreshCw, Mic, Send, HelpCircle } from "lucide-react";
 import { getCachedFingerprint } from "@/lib/fingerprint";
 
 export function InputScreen() {
@@ -549,9 +549,10 @@ export function InputScreen() {
                 type="button"
                 onClick={() => setHelpSheetOpen(true)}
                 aria-label={lang === "ar" ? "إزاي قراري بيشتغل؟" : "How does Qarari work?"}
-                className="flex h-5 w-5 items-center justify-center rounded-full border border-amber-500/40 text-[11px] font-bold text-amber-400 hover:bg-amber-500/10"
+                className="help-pulse-attn flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[11px] font-bold text-amber-400 hover:bg-amber-500/20"
               >
-                ?
+                <HelpCircle className="h-3.5 w-3.5" />
+                {t("helpButtonLabel")}
               </button>
             </div>
             <div className="flex gap-2">

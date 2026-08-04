@@ -246,7 +246,15 @@ export async function extractListingFromImage(
     "Respond with ONLY a single JSON object matching the given schema — no prose, no markdown. " +
     "If the product name isn't visible or identifiable, return null for productName. " +
     "If no price is visible in the image, return null for price — never guess or invent one. " +
-    "If a currency symbol/code is visible (e.g. EGP, ج.م, SAR, $, ريال), return its 3-letter code (EGP, USD, SAR, AED, EUR, KWD); otherwise return null.";
+    "The app only supports these 6 currencies — always return one of these exact 3-letter codes, or null if truly unclear:\n" +
+    "- EGP: symbols/words \"ج.م\", \"جنيه\", \"جنيه مصري\", \"LE\", \"L.E.\", \"E£\", \"EGP\"; also common on Egyptian retailer screenshots (amazon.eg, jumia.com.eg, btech.com, noon.com/egypt-en, 2b.com.eg, facebook marketplace posts in Egyptian Arabic).\n" +
+    "- SAR: symbols/words \"ر.س\", \"ريال\", \"ريال سعودي\", \"SR\", \"SAR\"; also Saudi retailers (noon.com/saudi-en, jarir.com, extra.com).\n" +
+    "- AED: symbols/words \"د.إ\", \"درهم\", \"درهم إماراتي\", \"AED\", \"DHS\"; also UAE retailers (amazon.ae, noon.com/uae-en, sharafdg.com).\n" +
+    "- USD: symbols \"$\", \"US$\", \"USD\", \"دولار\".\n" +
+    "- EUR: symbol \"€\", \"EUR\", \"يورو\".\n" +
+    "- KWD: symbols/words \"د.ك\", \"دينار\", \"دينار كويتي\", \"KD\", \"KWD\".\n" +
+    "Look for these cues anywhere in the image — the price tag itself, a currency label near the number, page/app chrome, a visible retailer name or URL, or surrounding text in the listing — not only a symbol glued directly to the digits. " +
+    "Only return null if none of these cues appear anywhere and you would otherwise be guessing.";
   const user = "Extract the product name, price, and currency from this photo.";
 
   const body = {
