@@ -479,7 +479,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log("[/api/analyze] Loading user row for quota check...");
       const { data: userRow, error: userErr } = await admin
         .from("users")
-        .select("tier, subscription_end_date, scans_used_this_month, scans_reset_at")
+        .select("tier, subscription_end_date, scans_used_this_month, scans_reset_at, scans_limit_this_month, current_plan_name")
         .eq("id", user.id)
         .single();
 
