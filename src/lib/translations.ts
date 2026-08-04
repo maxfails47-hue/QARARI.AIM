@@ -170,6 +170,7 @@ export const translations: Record<Language, Record<string, string>> = {
     needHelp: "محتاج مساعدة؟ تواصل معانا",
     supportWhatsapp: "واتساب",
     supportTelegram: "تيليجرام",
+    supportWhatsapp: "واتساب",
     premiumActive: "بريميوم نشط حتى",
     freePlanStatus: "خطة مجانية — {used} من {max} تحليلات مستخدمة",
     scansLeft: "{remaining} من {max} تحليلات مجانية متبقية",
@@ -250,6 +251,15 @@ export const translations: Record<Language, Record<string, string>> = {
     revealLockedLine2: "أفضل روابط المتاجر",
     revealLockedLine3: "الأسباب الكاملة للقرار",
     revealNotGoodDeal: "قرار مش موزون",
+
+    // ─── Section 3b: Shareable verdict card (TikTok/story-style image) ───
+    shareCardTagline: "حللت قبل ما أندم 😅",
+    shareCardHookBad: "وقعت في فخ سعر؟ قراري كشفه في ثواني",
+    shareCardHookGood: "السعر ده فرصة حقيقية ولا لأ؟ قراري قالها بالدليل",
+    shareCardPctOverpriced: "مبالغ فيه بنسبة",
+    shareCardPctCheaper: "أرخص من السوق بنسبة",
+    shareCardFooterCta: "🔍 جرّب أول تحليلاتك مجانًا على Qarari.AI",
+    shareCardSaved: "اتحفظت صورة القرار — تقدر تشاركها من الجاليري",
 
     // ─── Section 4: Photo-to-autofill ───
     extractReadingPhoto: "بنقرا التفاصيل من الصورة...",
@@ -430,6 +440,7 @@ export const translations: Record<Language, Record<string, string>> = {
     needHelp: "Need help? Contact us",
     supportWhatsapp: "WhatsApp",
     supportTelegram: "Telegram",
+    supportWhatsapp: "WhatsApp",
     premiumActive: "Premium active until",
     freePlanStatus: "Free plan — {used} of {max} analyses used",
     scansLeft: "{remaining} of {max} free analyses left",
@@ -510,6 +521,15 @@ export const translations: Record<Language, Record<string, string>> = {
     revealLockedLine2: "Best retailer links",
     revealLockedLine3: "Full verdict reasoning",
     revealNotGoodDeal: "Not a good deal",
+
+    // ─── Section 3b: Shareable verdict card (TikTok/story-style image) ───
+    shareCardTagline: "I checked before I regretted it 😅",
+    shareCardHookBad: "Fell for a price trap? Qarari caught it in seconds",
+    shareCardHookGood: "Is this price a real deal? Qarari has the proof",
+    shareCardPctOverpriced: "Overpriced by",
+    shareCardPctCheaper: "Cheaper than market by",
+    shareCardFooterCta: "🔍 Try your first free analyses on Qarari.AI",
+    shareCardSaved: "Verdict image saved — you can share it from your gallery",
 
     // ─── Section 4: Photo-to-autofill ───
     extractReadingPhoto: "Reading details from the photo...",

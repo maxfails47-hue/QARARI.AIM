@@ -131,6 +131,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "method_not_allowed" });
   }
 
+  // ---- Race-safe quota reservation (declared outside try/catch so the
+  // catch block can release a reservation if anything throws) ----
+  // See supabase-atomic-quota-migration.sql — same fix as analyze.ts/compare:
+  // the slot is claimed atomically BEFORE the paid AI call, not after it,
+  // so concurrent requests can't all read the same "still under limit"
+  // snapshot and all slip through.
+  const adminForRelease = getSupabaseAdmin();
+  let chatReservation:
+    | { kind: "premiumChat"; userId: string }
+    | { kind: "advisor"; identity: string }
+    | { kind: "report"; reportId: string; identity: string }
+    | null = null;
+
+  async function releaseChatReservation() {
+    if (!chatReservation) return;
+    try {
+      if (chatReservation.kind === "premiumChat") {
+        const { data } = await adminForRelease.from("users").select("premium_chat_used_this_month").eq("id", chatReservation.userId).single();
+        if (data) {
+          await adminForRelease.from("users").update({ premium_chat_used_this_month: Math.max(0, data.premium_chat_used_this_month - 1) }).eq("id", chatReservation.userId);
+        }
+      } else if (chatReservation.kind === "advisor") {
+        const { data } = await adminForRelease.from("advisor_usage").select("messages_used").eq("identity", chatReservation.identity).single();
+        if (data) {
+          await adminForRelease.from("advisor_usage").update({ messages_used: Math.max(0, data.messages_used - 1) }).eq("identity", chatReservation.identity);
+        }
+      } else if (chatReservation.kind === "report") {
+        const { data } = await adminForRelease.from("chat_usage").select("messages_used").eq("report_id", chatReservation.reportId).eq("identity", chatReservation.identity).single();
+        if (data) {
+          await adminForRelease.from("chat_usage").update({ messages_used: Math.max(0, data.messages_used - 1) }).eq("report_id", chatReservation.reportId).eq("identity", chatReservation.identity);
+        }
+      }
+    } catch (releaseErr) {
+      console.error("[/api/ask] Failed to release chat reservation (non-fatal):", releaseErr);
+    }
+  }
+
   try {
     const {
       reportId,
@@ -197,9 +234,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const isPremiumTier = tier === "premium";
-    let used = 0;
     let maxMessages = mode === "advisor" ? MAX_ADVISOR_MESSAGES_PER_MONTH_FREE : MAX_CHAT_MESSAGES_PER_REPORT;
 
+    // ---- Race-safe: atomic check-and-reserve BEFORE the paid AI call ----
+    // Each branch below claims its slot via a single row-locked Postgres
+    // function (see supabase-atomic-quota-migration.sql), so concurrent
+    // requests from the same identity can no longer all read the same
+    // "still under limit" snapshot and all slip through.
     if (isPremiumTier && mode === "advisor") {
       // Section 15 (fixed): advisor-mode monthly counter, using the REAL
       // per-plan limit stored on the user row at activation time — not the
@@ -207,51 +248,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // giving every premium plan the same 80/month regardless of what
       // they actually paid for. report-mode chat is handled separately
       // below and never touches this counter, for any tier.
-      console.log("[/api/ask] Loading premium advisor chat usage for user:", user!.id);
       const { data: premiumRow } = await admin
         .from("users")
-        .select("premium_chat_used_this_month, premium_chat_reset_at, chat_messages_limit")
+        .select("chat_messages_limit")
         .eq("id", user!.id)
         .single();
-
       maxMessages = premiumRow?.chat_messages_limit ?? DEFAULT_PREMIUM_CHAT_MONTHLY_LIMIT;
 
-      const now = new Date();
-      const resetAt = premiumRow?.premium_chat_reset_at ? new Date(premiumRow.premium_chat_reset_at) : null;
-      const needsReset = !resetAt || now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
-
-      if (needsReset) {
-        used = 0;
-        await admin.from("users").update({ premium_chat_used_this_month: 0, premium_chat_reset_at: now.toISOString() }).eq("id", user!.id);
-      } else {
-        used = premiumRow?.premium_chat_used_this_month || 0;
+      const { data: reserved, error: reserveErr } = await admin.rpc("increment_premium_chat", {
+        p_user_id: user!.id,
+        p_limit: maxMessages,
+      });
+      if (reserveErr) {
+        console.error("[/api/ask] increment_premium_chat RPC failed:", reserveErr);
+        return res.status(500).json({ error: "server_error" });
       }
-      console.log("[/api/ask] Premium advisor chat usage loaded. used:", used, "| max:", maxMessages);
+      if (!reserved) {
+        console.warn("[/api/ask] Chat message limit reached. identity:", identity, "| mode:", mode, "| tier:", tier);
+        return res.status(403).json({ error: "chat_limit_reached", remaining: 0, max: maxMessages });
+      }
+      chatReservation = { kind: "premiumChat", userId: user!.id };
     } else if (mode === "advisor") {
       // Open advisor mode (Free/guest): track monthly usage per user/IP
-      console.log("[/api/ask] Loading advisor usage for identity:", identity);
-      const { data: advisorUsageRow } = await admin
-        .from("advisor_usage")
-        .select("messages_used, reset_at")
-        .eq("identity", identity)
-        .single();
-
-      // Check if we need to reset the monthly counter
-      const now = new Date();
-      const resetAt = advisorUsageRow?.reset_at ? new Date(advisorUsageRow.reset_at) : null;
-      const needsReset = !resetAt || now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
-
-      if (needsReset) {
-        used = 0;
-        await admin.from("advisor_usage").upsert({
-          identity,
-          messages_used: 0,
-          reset_at: now.toISOString(),
-        });
-      } else {
-        used = advisorUsageRow?.messages_used || 0;
+      const { data: reserved, error: reserveErr } = await admin.rpc("increment_advisor_usage", {
+        p_identity: identity,
+        p_limit: maxMessages,
+      });
+      if (reserveErr) {
+        console.error("[/api/ask] increment_advisor_usage RPC failed:", reserveErr);
+        return res.status(500).json({ error: "server_error" });
       }
-      console.log("[/api/ask] Advisor usage loaded. used:", used);
+      if (!reserved) {
+        console.warn("[/api/ask] Chat message limit reached. identity:", identity, "| mode:", mode, "| tier:", tier);
+        return res.status(403).json({ error: "chat_limit_reached", remaining: 0, max: maxMessages });
+      }
+      chatReservation = { kind: "advisor", identity };
     } else {
       // Report mode: ALWAYS a fixed 20 messages per report_id, for every
       // tier including premium — this used to let premium share its
@@ -259,21 +290,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // counts (mixed two different quotas together, and per-report chat
       // should never have a monthly cap at all). Tracked in chat_usage,
       // same table/shape Free already used.
-      console.log("[/api/ask] Loading chat usage for identity:", identity);
-      const { data: usageRow } = await admin
-        .from("chat_usage")
-        .select("messages_used")
-        .eq("report_id", reportId)
-        .eq("identity", identity)
-        .single();
-
-      used = usageRow?.messages_used || 0;
-      console.log("[/api/ask] Chat usage loaded. used:", used);
-    }
-
-    if (used >= maxMessages) {
-      console.warn("[/api/ask] Chat message limit reached. identity:", identity, "| used:", used, "| mode:", mode, "| tier:", tier);
-      return res.status(403).json({ error: "chat_limit_reached", remaining: 0, max: maxMessages });
+      const { data: reserved, error: reserveErr } = await admin.rpc("increment_chat_usage", {
+        p_report_id: reportId,
+        p_identity: identity,
+        p_limit: maxMessages,
+      });
+      if (reserveErr) {
+        console.error("[/api/ask] increment_chat_usage RPC failed:", reserveErr);
+        return res.status(500).json({ error: "server_error" });
+      }
+      if (!reserved) {
+        console.warn("[/api/ask] Chat message limit reached. identity:", identity, "| mode:", mode, "| tier:", tier);
+        return res.status(403).json({ error: "chat_limit_reached", remaining: 0, max: maxMessages });
+      }
+      chatReservation = { kind: "report", reportId, identity };
     }
 
     let prompt: string;
@@ -326,12 +356,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[/api/ask] AI pipeline failed (both primary and fallback exhausted):");
       console.error(e);
       console.error(e?.stack);
+      await releaseChatReservation();
       return res.status(502).json({ error: "ask_failed", reason: e?.message });
     }
 
     const answer = aiResult.data?.answer;
     if (typeof answer !== "string" || !answer.trim()) {
       console.error("[/api/ask] AI response failed shape validation. data:", JSON.stringify(aiResult.data)?.slice(0, 2000));
+      await releaseChatReservation();
       return res.status(502).json({ error: "ask_invalid" });
     }
 
@@ -355,26 +387,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       usage: aiResult.usage,
     });
 
-    // ---- Record usage AFTER a successful answer (never before) ----
-    const newUsed = used + 1;
-    if (isPremiumTier && mode === "advisor") {
-      // Premium advisor: bump the monthly counter (now correctly scoped to
-      // advisor mode only — see the quota block above).
-      await admin.from("users").update({ premium_chat_used_this_month: newUsed }).eq("id", user!.id);
-    } else if (mode === "advisor") {
-      await admin.from("advisor_usage").upsert({
-        identity,
-        messages_used: newUsed,
-        reset_at: new Date().toISOString(),
-      });
-    } else {
-      // Report mode: always chat_usage, every tier — see the quota block above.
-      await admin.from("chat_usage").upsert({
-        report_id: reportId,
-        identity,
-        messages_used: newUsed,
-        updated_at: new Date().toISOString(),
-      });
+    // Usage was already reserved atomically before the AI call above —
+    // nothing left to record here. Just read back the current count for
+    // the "remaining" figure in the response below.
+    let newUsed = maxMessages;
+    if (chatReservation?.kind === "premiumChat") {
+      const { data } = await admin.from("users").select("premium_chat_used_this_month").eq("id", chatReservation.userId).single();
+      newUsed = data?.premium_chat_used_this_month ?? maxMessages;
+    } else if (chatReservation?.kind === "advisor") {
+      const { data } = await admin.from("advisor_usage").select("messages_used").eq("identity", chatReservation.identity).single();
+      newUsed = data?.messages_used ?? maxMessages;
+    } else if (chatReservation?.kind === "report") {
+      const { data } = await admin.from("chat_usage").select("messages_used").eq("report_id", chatReservation.reportId).eq("identity", chatReservation.identity).single();
+      newUsed = data?.messages_used ?? maxMessages;
     }
 
     // Smart Memory System: update user interests after each advisor interaction
@@ -455,6 +480,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (err: any) {
     logUnhandledError(err, start);
-    return res.status(500).json({ error: "server_error", message: err?.message, stack: err?.stack });
+    await releaseChatReservation();
+    // err.stack is logged server-side above — never expose it to the client.
+    return res.status(500).json({ error: "server_error", message: err?.message });
   }
 }

@@ -821,7 +821,7 @@ export function InputScreen() {
 
           {/* Submit */}
           <Button
-            onClick={handleSubmit}
+            onClick={quotaExceeded ? () => navigate("upgrade") : handleSubmit}
             disabled={loading}
             className="w-full bg-gradient-to-r from-amber-400 to-amber-600 text-[#0B0B0F] font-bold hover:from-amber-300 hover:to-amber-500 disabled:opacity-90"
           >

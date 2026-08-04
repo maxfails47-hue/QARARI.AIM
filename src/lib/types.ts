@@ -19,7 +19,7 @@ export const currencies: Currency[] = [
   { code: "KWD", enName: "Kuwaiti Dinar", arName: "دينار كويتي", enShort: "KWD", arShort: "دينار" },
 ];
 
-export const FREE_MONTHLY_LIMIT = 50; // temporarily raised from 5 for testing
+export const FREE_MONTHLY_LIMIT = 3; // matches FREE_TIER_LIMITS.scans in api/_planConfig.ts — used only as initial UI fallback before the real value loads from the server
 export const MONTHLY_PRICE = 150;
 export const INSTAPAY_NUMBER = "01025204455";
 export const SUPPORT_WHATSAPP = "201143494418";

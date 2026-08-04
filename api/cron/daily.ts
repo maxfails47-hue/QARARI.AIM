@@ -14,38 +14,6 @@ function isValidCronRequest(req: VercelRequest): boolean {
   return auth === `Bearer ${secret}`;
 }
 
-// ---- 1. Auto-revert expired Premium subscriptions to Free (Section 16) ----
-async function revertExpiredSubscriptions(admin: any) {
-  const now = new Date().toISOString();
-  const { data: expired, error } = await admin
-    .from("users")
-    .select("id, email, subscription_end_date")
-    .eq("tier", "premium")
-    .lt("subscription_end_date", now);
-
-  if (error || !expired?.length) return { reverted: 0 };
-
-  for (const u of expired) {
-    await admin.from("users").update({ tier: "free" }).eq("id", u.id);
-    await admin.from("admin_audit_log").insert({
-      admin_identity: "cron",
-      action_type: "subscription_expired_auto_revert",
-      target_user_id: u.id,
-      before_value: { tier: "premium" },
-      after_value: { tier: "free" },
-    });
-    if (u.email) {
-      await sendEmail(
-        u.email,
-        "انتهى اشتراكك في Qarari.AI Premium",
-        `<p>انتهت صلاحية اشتراكك في بريميوم. جدّد اشتراكك للاستمرار في الاستفادة من المميزات الكاملة.</p>
-         <p>Your Qarari.AI Premium subscription has expired. Renew to keep your full features.</p>`
-      );
-    }
-  }
-  return { reverted: expired.length };
-}
-
 // ---- 2. Proactively reset monthly free-scan counters (Section 14) ----
 async function resetMonthlyScans(admin: any) {
   const now = new Date();
@@ -53,13 +21,32 @@ async function resetMonthlyScans(admin: any) {
 
   const { data: usersToReset } = await admin
     .from("users")
-    .select("id")
+    .select("id, email, full_name")
+    .eq("tier", "free")
     .lt("scans_reset_at", startOfMonth)
     .gt("scans_used_this_month", 0);
 
   if (usersToReset?.length) {
     const ids = usersToReset.map((u: any) => u.id);
     await admin.from("users").update({ scans_used_this_month: 0, scans_reset_at: now.toISOString() }).in("id", ids);
+
+    // Nudge them back into the app now that their free monthly quota renewed.
+    // Capped per run so a single cron invocation can't fire an email storm.
+    const toEmail = usersToReset.filter((u: any) => u.email).slice(0, 200);
+    for (const u of toEmail) {
+      const name = u.full_name ? u.full_name.split(" ")[0] : "";
+      try {
+        await sendEmail(
+          u.email,
+          "تحليلاتك المجانية رجعت! 🎉 — Qarari.AI",
+          `<p>أهلاً ${name}،</p>
+           <p>تحليلاتك الثلاثة المجانية على قراري رجعت تاني الشهر ده. ارجع افتح التطبيق وقارن سعر أي حاجة بتفكر تشتريها قبل ما تدفع فلوسك.</p>
+           <p>Hi ${name}, your 3 free analyses on Qarari just renewed for this month. Come back and check the fair price on your next purchase before you pay.</p>`
+        );
+      } catch (e: any) {
+        console.error("[cron] Failed to send scans-reset nudge email to", u.email, ":", e?.message || e);
+      }
+    }
   }
 
   // Reset IP-based guest usage (legacy)
@@ -155,6 +142,7 @@ async function resetMonthlyCompares(admin: any) {
   const { data: usersToReset } = await admin
     .from("users")
     .select("id")
+    .eq("tier", "free")
     .lt("compares_reset_at", startOfMonth)
     .gt("compares_used_this_month", 0);
 
@@ -179,17 +167,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const admin = getSupabaseAdmin();
     const summary: Record<string, unknown> = {};
 
-    logStep("revertExpiredSubscriptions...");
-    try {
-      summary.subscriptions = await revertExpiredSubscriptions(admin);
-      console.log("[cron] revertExpiredSubscriptions result:", summary.subscriptions);
-    } catch (e: any) {
-      console.error("[cron] revertExpiredSubscriptions failed:");
-      console.error(e);
-      console.error(e?.stack);
-      summary.subscriptions = { error: String(e) };
-    }
-
+    // NOTE: subscription expiry-by-date was removed — plans here are purely
+    // quota-based (scans/compares/chat messages), with no calendar expiry.
+    // A prior "revertExpiredSubscriptions" step used to run here, but
+    // subscription_end_date is never set to a real date anywhere in the
+    // app (approve.ts always writes null), so it could never match a row
+    // and had silently done nothing since it was added.
     logStep("resetMonthlyScans...");
     try {
       summary.scanResets = await resetMonthlyScans(admin);

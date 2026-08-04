@@ -190,7 +190,7 @@ async function handleScansRemaining(req: VercelRequest, res: VercelResponse) {
     }
 
     const resetAt = new Date(row.scans_reset_at);
-    const needsReset = now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
+    const needsReset = row.tier === "free" && (now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth());
     const used = needsReset ? 0 : row.scans_used_this_month;
 
     const max = row.tier === "premium"
@@ -326,9 +326,7 @@ async function handleChatRemaining(req: VercelRequest, res: VercelResponse) {
     }
 
     if (tier === "premium") {
-      const resetAt = row.premium_chat_reset_at ? new Date(row.premium_chat_reset_at) : null;
-      const needsReset = !resetAt || now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
-      const used = needsReset ? 0 : row.premium_chat_used_this_month || 0;
+      const used = row.premium_chat_used_this_month || 0;
       const max = row.chat_messages_limit ?? DEFAULT_PREMIUM_LIMITS.chatMessages;
       return res.status(200).json({ remaining: Math.max(0, max - used), max });
     }
@@ -448,17 +446,25 @@ async function handleCompare(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: "premium_required" });
   }
 
-  const resetAt = new Date(userRow.compares_reset_at);
-  const needsReset = now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
-  const comparesUsed = needsReset ? 0 : userRow.compares_used_this_month;
-  if (needsReset) {
-    await admin.from("users").update({ compares_used_this_month: 0, compares_reset_at: now.toISOString() }).eq("id", user.id);
-  }
-
+  // Premium compares balance never resets automatically by calendar date —
+  // only a paid renewal (admin approval) refills it. This endpoint is
+  // premium-only past the check above, so there is no free-tier case here.
   // Section 15: Use dynamic limit from user row (stored when plan was activated)
   const comparesLimit = userRow.compares_limit_this_month ?? DEFAULT_COMPARE_LIMIT;
 
-  if (comparesUsed >= comparesLimit) {
+  // ---- Race-safe: atomic check-and-reserve BEFORE the paid AI call ----
+  // (see supabase-atomic-quota-migration.sql / increment_user_compares) —
+  // closes the same race window analyze.ts had: concurrent requests can no
+  // longer all read "still under limit" before any of them writes back.
+  const { data: reserved, error: reserveErr } = await admin.rpc("increment_user_compares", {
+    p_user_id: user.id,
+    p_limit: comparesLimit,
+  });
+  if (reserveErr) {
+    console.error("[/api/user?action=compare] increment_user_compares RPC failed:", reserveErr);
+    return res.status(500).json({ error: "server_error" });
+  }
+  if (!reserved) {
     return res.status(403).json({ error: "compare_limit_reached", remaining: 0, max: comparesLimit });
   }
 
@@ -485,12 +491,20 @@ async function handleCompare(req: VercelRequest, res: VercelResponse) {
     aiResult = await callAiWithFallback(prompt, undefined, false);
   } catch (e: any) {
     console.error("[/api/user?action=compare] AI pipeline failed (both primary and fallback exhausted):", e, e?.stack);
+    // Give the reserved slot back — never charge quota for a failed comparison.
+    await admin.from("users").select("compares_used_this_month").eq("id", user.id).single().then(({ data }) => {
+      if (data) return admin.from("users").update({ compares_used_this_month: Math.max(0, data.compares_used_this_month - 1) }).eq("id", user.id);
+    });
     return res.status(502).json({ error: "comparison_failed", reason: e?.message });
   }
 
   const parsed = aiResult.data;
   if (!Array.isArray(parsed?.rows) || !parsed?.finalRecommendation) {
     console.error("[/api/user?action=compare] AI response failed shape validation. parsed:", JSON.stringify(parsed)?.slice(0, 2000));
+    const { data: revertRow } = await admin.from("users").select("compares_used_this_month").eq("id", user.id).single();
+    if (revertRow) {
+      await admin.from("users").update({ compares_used_this_month: Math.max(0, revertRow.compares_used_this_month - 1) }).eq("id", user.id);
+    }
     return res.status(502).json({ error: "comparison_invalid" });
   }
 
@@ -507,9 +521,10 @@ async function handleCompare(req: VercelRequest, res: VercelResponse) {
     usage: aiResult.usage,
   });
 
-  // ---- Record usage AFTER a successful comparison (never before) ----
-  const newComparesUsed = comparesUsed + 1;
-  await admin.from("users").update({ compares_used_this_month: newComparesUsed }).eq("id", user.id);
+  // Usage was already reserved atomically before the AI call above (the
+  // RPC's `reserved === true` guarantees exactly one increment happened) —
+  // nothing left to record here, just reflect it for the response.
+  const newComparesUsed = (userRow.compares_used_this_month ?? 0) + 1;
 
   const result = {
     productA,
@@ -593,18 +608,27 @@ async function handleSubscribe(req: VercelRequest, res: VercelResponse) {
   // Nothing previously stopped a premium user from firing off another
   // subscribe request (and potentially getting double-charged / stacking
   // plans) before their current one expires.
+  //
+  // NOTE: this app has no subscription_end_date in practice — approve.ts
+  // always sets it to null (quotas are monthly-usage-based, not date-based).
+  // The old check (`!subscription_end_date || end_date >= now`) was true
+  // for every premium user forever, so nobody could ever submit a renewal
+  // request once their plan ran out — a permanent dead end. Gate on actual
+  // remaining quota instead: block only while they still have scans left
+  // on the plan they already paid for.
   const { data: activeCheck } = await admin
     .from("users")
-    .select("tier, subscription_end_date")
+    .select("tier, scans_used_this_month, scans_limit_this_month")
     .eq("id", user.id)
     .single();
-  const stillActive =
-    activeCheck?.tier === "premium" &&
-    (!activeCheck.subscription_end_date || new Date(activeCheck.subscription_end_date) >= new Date());
+  const scansRemaining = activeCheck
+    ? (activeCheck.scans_limit_this_month ?? DEFAULT_PREMIUM_LIMITS.scans) - (activeCheck.scans_used_this_month ?? 0)
+    : 0;
+  const stillActive = activeCheck?.tier === "premium" && scansRemaining > 0;
   if (stillActive) {
     return res.status(409).json({
       error: "already_subscribed",
-      message: "لسه عندك باقة شغالة حاليًا. مينفعش تفعّل باقة جديدة إلا بعد ما تخلص الباقة الحالية.",
+      message: "لسه عندك تحليلات فاضلة في باقتك الحالية. مينفعش تفعّل باقة جديدة إلا بعد ما تخلصها.",
     });
   }
 
@@ -769,6 +793,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return result;
   } catch (err: any) {
     logUnhandledError(err, start);
-    return res.status(500).json({ error: "server_error", message: err?.message, stack: err?.stack });
+    // err.stack is logged server-side above — never expose it to the client.
+    return res.status(500).json({ error: "server_error", message: err?.message });
   }
 }

@@ -4,6 +4,7 @@ import { getCategoryIcon } from "@/lib/categoryIcons";
 import { currencies } from "@/lib/types";
 import type { Verdict } from "@/lib/types";
 import { Check, X, Lock, Share2, Sparkles } from "lucide-react";
+import { generateShareCard } from "@/lib/shareCard";
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -108,6 +109,80 @@ export function RevealScreen() {
   }
 
   const handleShare = async () => {
+    // Percentage badge: how far the offered price sits from the fair price,
+    // using the same `min` the price-position bar already shows.
+    let pctLabel: string | null = null;
+    let pctPrefix: string | null = null;
+    if (min !== null && min > 0) {
+      if (isBad) {
+        const pct = Math.round(((report.offeredPrice - min) / min) * 100);
+        if (pct > 0) {
+          pctLabel = `+${pct}%`;
+          pctPrefix = t("shareCardPctOverpriced");
+        }
+      } else {
+        const pct = Math.round(((min - report.offeredPrice) / min) * 100);
+        if (pct > 0) {
+          pctLabel = `-${pct}%`;
+          pctPrefix = t("shareCardPctCheaper");
+        }
+      }
+    }
+
+    let blob: Blob | null = null;
+    try {
+      blob = await generateShareCard({
+        lang,
+        verdict: report.verdict,
+        productName: report.product,
+        offeredPrice: report.offeredPrice,
+        fairPrice: min,
+        currencyShort: cShort,
+        pctLabel,
+        copy: {
+          tagline: t("shareCardTagline"),
+          hookLine: isBad ? t("shareCardHookBad") : t("shareCardHookGood"),
+          verdictLabel: isBad
+            ? t("revealNotGoodDeal")
+            : t(report.verdict === "good" ? "goodDeal" : "fairDeal"),
+          offeredLabel: t("offeredPrice"),
+          fairLabel: t("revealFairPriceFrom"),
+          pctPrefix,
+          lockedTitle: t("revealLockedTitle"),
+          lockedDesc: t("revealLockedDesc"),
+          ctaLabel: t("revealSeeFullAnalysis"),
+          shareLabel: t("revealShare"),
+          footerCta: t("shareCardFooterCta"),
+          brand: t("appName"),
+        },
+      });
+    } catch {
+      blob = null; // canvas unsupported or drawing failed — fall through to text share
+    }
+
+    if (blob) {
+      const file = new File([blob], "qarari-verdict.png", { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: t("appName") });
+        } catch {
+          // user cancelled the share sheet — no-op, not an error
+        }
+        return;
+      }
+      // No file-sharing support (older browsers) — download the image directly
+      // so the user still ends up with a shareable picture in their gallery.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "qarari-verdict.png";
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(t("shareCardSaved"));
+      return;
+    }
+
+    // Last-resort fallback: plain text share (original behavior).
     const summary = `${t("appName")} — ${report.product}\n${t(
       report.verdict === "good" ? "goodDeal" : report.verdict === "fair" ? "fairDeal" : "badDeal"
     )}\n${t("offeredPrice")}: ${fmt(report.offeredPrice)} ${cShort}${

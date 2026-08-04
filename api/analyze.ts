@@ -444,6 +444,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "method_not_allowed" });
   }
 
+  // ---- Race-safe quota reservation (declared outside the try/catch below
+  // so the catch block can release a reservation if anything throws) ----
+  const adminForRelease = getSupabaseAdmin();
+  let usageReservation: { kind: "user"; userId: string } | { kind: "device"; fingerprint: string; ip: string; resetAt: string } | { kind: "ip"; ip: string } | null = null;
+
+  async function releaseReservation() {
+    if (!usageReservation) return;
+    try {
+      if (usageReservation.kind === "user") {
+        const { data: row } = await adminForRelease.from("users").select("scans_used_this_month").eq("id", usageReservation.userId).single();
+        if (row) {
+          await adminForRelease.from("users").update({ scans_used_this_month: Math.max(0, row.scans_used_this_month - 1) }).eq("id", usageReservation.userId);
+        }
+      } else if (usageReservation.kind === "device") {
+        const { data: row } = await adminForRelease
+          .from("device_usage_logs")
+          .select("scans_used_this_month")
+          .eq("device_fingerprint", usageReservation.fingerprint)
+          .eq("scans_reset_at", usageReservation.resetAt)
+          .single();
+        if (row) {
+          await adminForRelease
+            .from("device_usage_logs")
+            .update({ scans_used_this_month: Math.max(0, row.scans_used_this_month - 1) })
+            .eq("device_fingerprint", usageReservation.fingerprint)
+            .eq("scans_reset_at", usageReservation.resetAt);
+        }
+      } else if (usageReservation.kind === "ip") {
+        const { data: row } = await adminForRelease.from("guest_usage").select("scans_used_this_month").eq("ip_address", usageReservation.ip).single();
+        if (row) {
+          await adminForRelease.from("guest_usage").update({ scans_used_this_month: Math.max(0, row.scans_used_this_month - 1) }).eq("ip_address", usageReservation.ip);
+        }
+      }
+    } catch (releaseErr) {
+      console.error("[/api/analyze] Failed to release usage reservation (non-fatal):", releaseErr);
+    }
+  }
+
   try {
     const {
       product,
@@ -472,7 +510,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log("Authentication OK. Signed in:", !!user, user ? `(userId: ${user.id})` : "(guest)");
 
     let tier: "free" | "premium" = "free";
-    let quotaOk = true;
+    // usageReservation/releaseReservation are declared above the outer
+    // try/catch (Race-safe quota reservation) so a thrown error anywhere
+    // below can still give the reserved slot back.
 
     if (user) {
       // ---- SIGNED-IN USER: check/enforce quota tied to their account row ----
@@ -498,24 +538,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       tier = effectiveTier as "free" | "premium";
 
-      // Reset monthly counter if a new cycle has started
-      const resetAt = new Date(userRow.scans_reset_at);
-      const needsReset = now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
-      let scansUsed = needsReset ? 0 : userRow.scans_used_this_month;
-      if (needsReset) {
-        await admin.from("users").update({ scans_used_this_month: 0, scans_reset_at: now.toISOString() }).eq("id", user.id);
-      }
-
       // Section 15: Use dynamic limits from user row (stored when plan was activated)
       const scansLimit = tier === "premium" ? (userRow.scans_limit_this_month || DEFAULT_PREMIUM_LIMITS.scans) : FREE_MONTHLY_LIMIT;
-      
-      if (scansUsed >= scansLimit) {
-        quotaOk = false;
-      }
 
-      // Fair Use rate limit check
+      // Fair Use rate limit check (uses last-known usage snapshot purely for
+      // the "how close to the cap" warning threshold — the actual quota
+      // decision below is atomic and authoritative regardless of this value).
       const planName = tier === "premium" ? (userRow.current_plan_name || "small_bundle") : "free";
-      const fairUse = checkFairUseRateLimit("user:" + user.id, planName, scansLimit, scansUsed);
+      const fairUse = checkFairUseRateLimit("user:" + user.id, planName, scansLimit, userRow.scans_used_this_month);
       if (!fairUse.allowed) {
         console.warn("[Fair Use / analyze] Rate limited user:", user.id, "| plan:", planName);
         return res.status(429).json({
@@ -525,10 +555,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      if (!quotaOk) {
+      // Atomic check-and-reserve — free tier also gets its calendar-month
+      // reset applied inside the same transaction.
+      const { data: reserved, error: reserveErr } = await admin.rpc("increment_user_scans", {
+        p_user_id: user.id,
+        p_limit: scansLimit,
+        p_do_monthly_reset: tier === "free",
+      });
+      if (reserveErr) {
+        console.error("[/api/analyze] increment_user_scans RPC failed:", reserveErr);
+        return res.status(500).json({ error: "server_error" });
+      }
+      if (!reserved) {
         console.warn("[/api/analyze] Quota exceeded for user:", user.id, "| tier:", tier);
         return res.status(403).json({ error: "quota_exceeded" });
       }
+      usageReservation = { kind: "user", userId: user.id };
     } else {
       // ---- GUEST: track by Device Fingerprint + IP (Server-authoritative) ----
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
@@ -576,9 +618,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       console.log("[/api/analyze] Guest request. IP:", ip, "| FP:", effectiveFingerprint || "(none)");
 
-      let scansUsed = 0;
+      // Fair Use rate limit check for guests. Uses a last-known usage
+      // snapshot purely for the "how close to the cap" warning threshold —
+      // the actual quota decision below is atomic and authoritative
+      // regardless of this value, so a stale read here can't be exploited.
+      let lastKnownUsed = 0;
       if (effectiveFingerprint) {
-        // Use fingerprint-based tracking (primary)
         const { data: logRow } = await admin
           .from("device_usage_logs")
           .select("scans_used_this_month, scans_reset_at")
@@ -586,28 +631,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-
         if (logRow) {
           const resetAt = new Date(logRow.scans_reset_at);
           const needsReset = now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
-          scansUsed = needsReset ? 0 : logRow.scans_used_this_month;
+          lastKnownUsed = needsReset ? 0 : logRow.scans_used_this_month;
         }
       } else {
-        // Fallback: IP-based (legacy clients without FingerprintJS)
         const { data: guestRow } = await admin.from("guest_usage").select("*").eq("ip_address", ip).single();
         if (guestRow) {
           const resetAt = new Date(guestRow.scans_reset_at);
           const needsReset = now.getUTCFullYear() !== resetAt.getUTCFullYear() || now.getUTCMonth() !== resetAt.getUTCMonth();
-          scansUsed = needsReset ? 0 : guestRow.scans_used_this_month;
+          lastKnownUsed = needsReset ? 0 : guestRow.scans_used_this_month;
         }
       }
 
-      // Fair Use rate limit check for guests
       const guestFairUse = checkFairUseRateLimit(
         "guest:" + (effectiveFingerprint || ip),
         "free",
         FREE_MONTHLY_LIMIT,
-        scansUsed
+        lastKnownUsed
       );
       if (!guestFairUse.allowed) {
         console.warn("[Fair Use / analyze] Rate limited guest. IP:", ip, "| FP:", effectiveFingerprint || "(none)");
@@ -618,34 +660,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      if (scansUsed >= FREE_MONTHLY_LIMIT) {
-        console.warn("[/api/analyze] Guest quota exceeded. IP:", ip, "| FP:", effectiveFingerprint || "(none)", "| scansUsed:", scansUsed);
-        return res.status(403).json({ error: "quota_exceeded" });
-      }
-
-      // Upsert tracking row (incremented after successful analysis, below)
+      // Atomic check-and-reserve — no more read-then-upsert race window.
       if (effectiveFingerprint) {
-        // Create/update device_usage_logs entry for this fingerprint
-        await admin.from("device_usage_logs").upsert(
-          {
-            device_fingerprint: effectiveFingerprint,
-            ip_address: ip,
-            user_agent: req.headers["user-agent"] as string || null,
-            scans_used_this_month: scansUsed,
-            scans_reset_at: now.getUTCFullYear() + "-" + String(now.getUTCMonth() + 1).padStart(2, "0") + "-01T00:00:00.000Z",
-            last_seen_at: now.toISOString(),
-          },
-          { onConflict: "device_fingerprint,scans_reset_at" }
-        );
-      } else {
-        // Fallback: legacy IP-based upsert
-        await admin.from("guest_usage").upsert({
-          ip_address: ip,
-          scans_used_this_month: scansUsed,
-          scans_reset_at: now.toISOString(),
-          updated_at: now.toISOString(),
-          linked_fingerprint: null,
+        const monthResetAt = now.getUTCFullYear() + "-" + String(now.getUTCMonth() + 1).padStart(2, "0") + "-01T00:00:00.000Z";
+        const { data: reserved, error: reserveErr } = await admin.rpc("increment_device_scan", {
+          p_fingerprint: effectiveFingerprint,
+          p_ip: ip,
+          p_reset_at: monthResetAt,
+          p_limit: FREE_MONTHLY_LIMIT,
         });
+        if (reserveErr) {
+          console.error("[/api/analyze] increment_device_scan RPC failed:", reserveErr);
+          return res.status(500).json({ error: "server_error" });
+        }
+        if (!reserved) {
+          console.warn("[/api/analyze] Guest quota exceeded. IP:", ip, "| FP:", effectiveFingerprint);
+          return res.status(403).json({ error: "quota_exceeded" });
+        }
+        usageReservation = { kind: "device", fingerprint: effectiveFingerprint, ip, resetAt: monthResetAt };
+      } else {
+        const { data: reserved, error: reserveErr } = await admin.rpc("increment_ip_scan", {
+          p_ip: ip,
+          p_limit: FREE_MONTHLY_LIMIT,
+        });
+        if (reserveErr) {
+          console.error("[/api/analyze] increment_ip_scan RPC failed:", reserveErr);
+          return res.status(500).json({ error: "server_error" });
+        }
+        if (!reserved) {
+          console.warn("[/api/analyze] Guest quota exceeded (IP-only). IP:", ip);
+          return res.status(403).json({ error: "quota_exceeded" });
+        }
+        usageReservation = { kind: "ip", ip };
       }
     }
 
@@ -953,55 +999,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       createdAt: Date.now(),
     };
 
-    // ---- Record usage AFTER a successful analysis (never before) ----
-    console.log("[/api/analyze] Recording usage...");
-    if (user) {
-      const { data: row } = await admin.from("users").select("scans_used_this_month").eq("id", user.id).single();
-      await admin.from("users").update({ scans_used_this_month: (row?.scans_used_this_month || 0) + 1 }).eq("id", user.id);
-    } else {
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
-      const now = new Date();
-      const currentMonthReset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-
-      // Resolve effective fingerprint again (same logic as quota check)
-      let effectiveFingerprint: string | null = deviceFingerprint || null;
-      if (effectiveFingerprint) {
-        const { data: existingAlias } = await admin
-          .from("guest_device_aliases")
-          .select("primary_fingerprint")
-          .eq("device_fingerprint", effectiveFingerprint)
-          .single();
-        if (existingAlias) {
-          effectiveFingerprint = existingAlias.primary_fingerprint;
-        }
-      }
-
-      if (effectiveFingerprint) {
-        // Increment fingerprint-based counter
-        const { data: logRow } = await admin
-          .from("device_usage_logs")
-          .select("scans_used_this_month")
-          .eq("device_fingerprint", effectiveFingerprint)
-          .eq("scans_reset_at", currentMonthReset)
-          .single();
-
-        const currentCount = logRow ? logRow.scans_used_this_month : 0;
-        await admin.from("device_usage_logs").upsert(
-          {
-            device_fingerprint: effectiveFingerprint,
-            ip_address: ip,
-            scans_used_this_month: currentCount + 1,
-            scans_reset_at: currentMonthReset,
-            last_seen_at: now.toISOString(),
-          },
-          { onConflict: "device_fingerprint,scans_reset_at" }
-        );
-      } else {
-        // Fallback: IP-based (legacy)
-        const { data: row } = await admin.from("guest_usage").select("scans_used_this_month").eq("ip_address", ip).single();
-        await admin.from("guest_usage").update({ scans_used_this_month: (row?.scans_used_this_month || 0) + 1 }).eq("ip_address", ip);
-      }
-    }
+    // Usage was already reserved atomically up front (see usageReservation
+    // above) — nothing left to record here. This also means a failed
+    // analysis (thrown error below) correctly gives the slot back via
+    // releaseReservation() in the catch block, same guarantee as before.
+    console.log("[/api/analyze] Usage already recorded atomically at reservation time.");
 
     // ---- Item 4: auto-save premium analyses to history (regardless of the
     // "Save" button) — mirrors the same "analyses" table/shape AppContext's
@@ -1034,10 +1036,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(result);
   } catch (err: any) {
     logUnhandledError(err, start);
+    await releaseReservation();
+    // err.stack is logged server-side above (logUnhandledError) — never
+    // send stack traces to the client, they leak internal file paths and
+    // code structure to anyone who can trigger a 500.
     return res.status(500).json({
       error: "server_error",
       message: err?.message,
-      stack: err?.stack,
     });
   }
 }
