@@ -147,6 +147,7 @@ export function RevealScreen() {
             : t(report.verdict === "good" ? "goodDeal" : "fairDeal"),
           offeredLabel: t("offeredPrice"),
           fairLabel: t("revealFairPriceFrom"),
+          fairLockNote: t("shareCardFairLockNote"),
           pctPrefix,
           lockedTitle: t("revealLockedTitle"),
           lockedDesc: t("revealLockedDesc"),

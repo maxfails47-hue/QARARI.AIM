@@ -23,6 +23,7 @@ export interface ShareCardParams {
     verdictLabel: string; // goodDeal / fairDeal / revealNotGoodDeal
     offeredLabel: string;
     fairLabel: string; // revealFairPriceFrom
+    fairLockNote: string; // small caption under the fair price teasing the locked detail
     pctPrefix: string | null; // shareCardPctOverpriced / shareCardPctCheaper
     lockedTitle: string;
     lockedDesc: string;
@@ -225,12 +226,17 @@ export async function generateShareCard(p: ShareCardParams): Promise<Blob | null
     p.fairPrice === null ? (p.lang === "ar" ? "—" : "N/A") : Math.round(p.fairPrice).toLocaleString();
   ctx.fillText(fairStr, rightX, y + 60);
 
-  ctx.font = `bold 20px ${fontFamily}`;
+  ctx.font = `20px ${fontFamily}`;
   ctx.fillStyle = "#75757e";
-  ctx.fillText("🔒", rightX, y + 100);
+  const lockNoteLines = wrapText(ctx, p.copy.fairLockNote, 300).slice(0, 2);
+  let lockY = y + 96;
+  for (const line of lockNoteLines) {
+    ctx.fillText(line, rightX, lockY);
+    lockY += 26;
+  }
 
   // ---- locked / unlock box ----
-  y += 170;
+  y += 170 + (lockNoteLines.length - 1) * 26;
   const boxW = W - 160;
   const boxX = cx - boxW / 2;
   const boxH = 240;

@@ -221,7 +221,7 @@ interface SearchState {
   validPriceCount: number;
 }
 
-async function smartAdaptiveSearch(product: string, currency: string, region: { gl: string; hl: string }, condition: "new" | "likeNew" | "used"): Promise<{ results: SerperResult[]; searchCount: number; retailerSearchResults: SerperResult[] }> {
+async function smartAdaptiveSearch(product: string, currency: string, region: { gl: string; hl: string }, condition: "new" | "likeNew" | "used", altProduct: string = ""): Promise<{ results: SerperResult[]; searchCount: number; retailerSearchResults: SerperResult[] }> {
   const state: SearchState = {
     allResults: [],
     searchCount: 0,
@@ -247,7 +247,7 @@ async function smartAdaptiveSearch(product: string, currency: string, region: { 
     state.allResults.push(...results1);
     state.searchCount++;
 
-    let priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition);
+    let priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition, altProduct);
     if (priceAnalysis?.confidence === "High" && priceAnalysis.validCount >= 5) {
       // Used/likeNew marketplace results ARE the retailer results for this
       // condition — reuse them so direct listing links can be built too.
@@ -272,7 +272,7 @@ async function smartAdaptiveSearch(product: string, currency: string, region: { 
   console.log(`[SmartSearch] Search 1 returned ${results1.length} results`);
 
   // Check early stop condition 1: Confidence >= 90%
-  let priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition);
+  let priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition, altProduct);
   if (priceAnalysis?.confidence === "High" && priceAnalysis.validCount >= 5) {
     console.log("[SmartSearch] Early stop: Confidence >= 90%");
     // Official-store-only stop means we never ran the marketplace (Jumia/Noon)
@@ -294,7 +294,7 @@ async function smartAdaptiveSearch(product: string, currency: string, region: { 
   const retailerSearchResults = results2;
 
   // Check early stop condition 2: At least 5 valid prices AND median change < 1%
-  priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition);
+  priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition, altProduct);
   if (priceAnalysis?.validCount >= 5) {
     const medianChange = state.lastMedian ? Math.abs(priceAnalysis.mid - state.lastMedian) / state.lastMedian : 1;
     if (medianChange < 0.01) {
@@ -304,24 +304,49 @@ async function smartAdaptiveSearch(product: string, currency: string, region: { 
     state.lastMedian = priceAnalysis.mid;
   }
 
-  // Check early stop condition 3: Last two searches added no new valid prices
+  // Check early stop condition 3: Last two searches added no new valid prices.
+  // IMPORTANT: only counts as "no progress" if we'd already found SOME valid
+  // prices — if validPriceCount is still 0 (e.g. a product from an
+  // independent brand site that isn't on Amazon/Jumia/Noon/BTech), that just
+  // means the official+marketplace searches don't apply here, not that
+  // pricing is unreachable. In that case we must still try Search 3 below
+  // (the unrestricted general web search) before giving up — stopping here
+  // was silently skipping it and returning "price not available" for every
+  // product outside the hardcoded retailer list.
   const pricesBefore = state.validPriceCount;
-  priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition);
+  priceAnalysis = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition, altProduct);
   state.validPriceCount = priceAnalysis?.validCount || 0;
   
-  if (state.validPriceCount === pricesBefore && state.searchCount >= 2) {
+  if (state.validPriceCount > 0 && state.validPriceCount === pricesBefore && state.searchCount >= 2) {
     console.log("[SmartSearch] Early stop: No new valid prices in last searches");
     return { results: state.allResults, searchCount: state.searchCount, retailerSearchResults };
   }
 
   // If confidence still below 90%, execute ONE additional search (Google Shopping)
   if (state.searchCount < maxSearches && (!priceAnalysis || priceAnalysis.confidence !== "High")) {
-    console.log("[SmartSearch] Search 3: Google Shopping results");
+    console.log("[SmartSearch] Search 3: General web search (no site restriction)");
     let query3 = `${product} price ${currency}`;
     let results3 = await searchSerper(query3, region);
     state.allResults.push(...results3);
     state.searchCount++;
     console.log(`[SmartSearch] Search 3 returned ${results3.length} results`);
+
+    // If we STILL have zero valid prices after the general search too, this
+    // is very likely a niche/independent brand (not a major retailer at
+    // all) — try one more, even looser query without the "price" keyword
+    // forced next to a specific currency, since brand sites/social posts
+    // often just show the number with a currency symbol rather than the
+    // word "price". This is our last, broadest attempt before we accept
+    // there's genuinely no findable market price.
+    const afterSearch3 = await computeMarketPriceRange(state.allResults, currency as any, `PRODUCT: ${product}`, condition, altProduct);
+    if ((!afterSearch3 || afterSearch3.validCount === 0) && state.searchCount < maxSearches) {
+      console.log("[SmartSearch] Search 4: Broadest fallback (brand/independent site)");
+      let query4 = `"${product}" ${currency}`;
+      let results4 = await searchSerper(query4, region);
+      state.allResults.push(...results4);
+      state.searchCount++;
+      console.log(`[SmartSearch] Search 4 returned ${results4.length} results`);
+    }
   }
 
   return { results: state.allResults, searchCount: state.searchCount, retailerSearchResults };
@@ -947,12 +972,13 @@ export async function getFairPriceRangeViaSerperFallback(
   product: string,
   currency: string,
   condition: "new" | "likeNew" | "used",
-  specs: string
+  specs: string,
+  altProduct: string = ""
 ): Promise<FairPriceRange> {
   try {
     const region = getRegionForCurrency(currency);
     const searchTerm = buildSearchTerm(product, specs);
-    const { results } = await smartAdaptiveSearch(searchTerm, currency, region, condition);
+    const { results } = await smartAdaptiveSearch(searchTerm, currency, region, condition, altProduct);
 
     if (results.length === 0) {
       console.warn(`[getFairPriceRangeViaSerperFallback] No Serper results for "${product}" — returning null range.`);
@@ -1029,10 +1055,14 @@ export async function getFairPriceRange(
   specs: string
 ): Promise<FairPriceRange> {
   // Always search using a normalized/English product name — see
-  // normalizeProductNameForSearch above for why this matters.
+  // normalizeProductNameForSearch above for why this matters. We also keep
+  // the original (possibly Arabic) name and pass it through as an alternate
+  // match target, since an independent/local brand's own listing page is
+  // often Arabic-only and would never contain the English-translated name.
   const searchProduct = await normalizeProductNameForSearch(product);
+  const altProduct = searchProduct !== product ? product : "";
   try {
-    const serperResult = await getFairPriceRangeViaSerperFallback(searchProduct, currency, condition, specs);
+    const serperResult = await getFairPriceRangeViaSerperFallback(searchProduct, currency, condition, specs, altProduct);
     if (serperResult.min !== null && serperResult.max !== null) {
       return serperResult;
     }

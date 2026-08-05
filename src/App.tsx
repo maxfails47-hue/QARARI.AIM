@@ -61,7 +61,7 @@ function HelpFab() {
   if (screen === "login" || screen === "upgrade") return null;
   return (
     <button
-      // Replays the full 5-slide onboarding (Section 1) — this is now the
+      // Replays the full 6-slide onboarding (Section 1) — this is now the
       // "about / how everything works" reference for the whole app, not
       // just the old 3-step summary. The small "?" next to the photo
       // upload field still opens the quick HelpSheet inline.

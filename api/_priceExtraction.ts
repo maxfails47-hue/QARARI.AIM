@@ -113,15 +113,26 @@ function getTrustWeight(url: string): number {
   return 1;
 }
 
-export function extractPrices(text: string, title: string, url: string, condition: string, productName: string = ""): PriceHit[] {
+export function extractPrices(text: string, title: string, url: string, condition: string, productName: string = "", altProductName: string = ""): PriceHit[] {
   const prices: PriceHit[] = [];
 
   // Product-identity gate: if this result's title+content doesn't actually
   // mention the product we're pricing (all significant tokens present as
   // whole words), skip it entirely — don't let a "similar products" /
   // different-model price leak into the range. See matchesProduct above.
+  //
+  // We check BOTH the search-normalized name (often translated to English,
+  // e.g. "La Belle Hot Air Brush") AND the original name as given (which
+  // may be Arabic, e.g. "لابيل برش - اسود") and accept the result if EITHER
+  // fully matches. A listing on an Arabic-only independent brand site will
+  // never contain the English-translated tokens, so requiring only the
+  // normalized name was silently discarding every real match for products
+  // not sold on major English-language marketplaces.
   const productTokens = getSignificantTokens(productName);
-  if (!matchesProduct(`${title} ${text}`, productTokens)) return prices;
+  const altTokens = getSignificantTokens(altProductName);
+  const matchesPrimary = matchesProduct(`${title} ${text}`, productTokens);
+  const matchesAlt = altTokens.length > 0 ? matchesProduct(`${title} ${text}`, altTokens) : false;
+  if (!matchesPrimary && !matchesAlt) return prices;
 
   const normalizedText = normalizeDigits(text);
   const numRegex = /\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?/g;
@@ -195,7 +206,7 @@ function calculateWeightedMedian(values: number[], weights: number[]): number {
   return sorted[sorted.length - 1].value;
 }
 
-export async function computeMarketPriceRange(results: any[], targetCurrency: SupportedCurrency, prompt: string, condition: string = "new") {
+export async function computeMarketPriceRange(results: any[], targetCurrency: SupportedCurrency, prompt: string, condition: string = "new", altProductName: string = "") {
   // The caller passes `PRODUCT: <name>` as `prompt` — pull the bare name back
   // out so extractPrices can gate out results that aren't actually about it.
   const productMatch = prompt.match(/PRODUCT:\s*(.+)/i);
@@ -203,7 +214,7 @@ export async function computeMarketPriceRange(results: any[], targetCurrency: Su
 
   let allPrices: PriceHit[] = [];
   for (const r of results) {
-    allPrices = allPrices.concat(extractPrices(r.content, r.title, r.url, condition, productName));
+    allPrices = allPrices.concat(extractPrices(r.content, r.title, r.url, condition, productName, altProductName));
   }
 
   if (allPrices.length === 0) return null;
