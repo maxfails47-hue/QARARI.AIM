@@ -793,7 +793,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return result;
   } catch (err: any) {
     logUnhandledError(err, start);
-    // err.stack is logged server-side above — never expose it to the client.
-    return res.status(500).json({ error: "server_error", message: err?.message });
+    return res.status(500).json({ error: "server_error", message: err?.message, stack: err?.stack });
   }
 }
