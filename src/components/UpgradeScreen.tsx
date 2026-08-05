@@ -297,9 +297,6 @@ export function UpgradeScreen() {
             <PlanCard id="medium_bundle" title={t("oneTimeMedium")} price={t("oneTimeMediumPrice")} features={t("oneTimeMediumFeatures")} highlight={true} badge={lang === "ar" ? "الأكثر طلبًا" : "Popular"} />
             <PlanCard id="large_bundle" title={t("oneTimeLarge")} price={t("oneTimeLargePrice")} features={t("oneTimeLargeFeatures")} />
           </div>
-          <p className="mt-4 text-center text-xs leading-relaxed text-zinc-500">
-            {t("oneTimeRenewalNote")}
-          </p>
         </section>
 
         {/* Monthly Subscriptions */}
@@ -340,9 +337,6 @@ export function UpgradeScreen() {
               </Button>
             </div>
           </div>
-          <p className="mt-4 text-center text-xs leading-relaxed text-zinc-500">
-            {t("oneTimeRenewalNote")}
-          </p>
         </section>
 
         {/* Value reinforcement */}
