@@ -1037,10 +1037,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err: any) {
     logUnhandledError(err, start);
     await releaseReservation();
+    // err.stack is logged server-side above (logUnhandledError) — never
+    // send stack traces to the client, they leak internal file paths and
+    // code structure to anyone who can trigger a 500.
     return res.status(500).json({
       error: "server_error",
       message: err?.message,
-      stack: err?.stack,
     });
   }
 }
