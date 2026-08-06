@@ -9,6 +9,7 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { GuideScreen } from "@/components/GuideScreen";
 import { AdvisorScreen } from "@/components/AdvisorScreen";
 import { WatchlistScreen } from "@/components/WatchlistScreen";
+import { VerifyListingScreen } from "@/components/VerifyListingScreen";
 import { OnboardingScreen } from "@/components/OnboardingScreen";
 import { HelpSheet } from "@/components/HelpSheet";
 import { HelpCircle } from "lucide-react";
@@ -32,6 +33,8 @@ function ScreenRouter() {
       return <AdvisorScreen />;
     case "watchlist":
       return <WatchlistScreen />;
+    case "verify-listing":
+      return <VerifyListingScreen />;
 
     default:
       return <DecisionInput />;

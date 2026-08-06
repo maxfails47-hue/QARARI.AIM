@@ -222,6 +222,10 @@ const GEMINI_EXTRACT_SCHEMA = {
     productName: { type: "string", nullable: true },
     price: { type: "number", nullable: true },
     currency: { type: "string", nullable: true },
+    // Optional — only used by the listing-verification flow (api/verify-listing.ts).
+    // A discount percentage explicitly written/shown in the image (e.g. "خصم 20%",
+    // a struck-through original price next to a lower one). Never inferred/guessed.
+    discountPercent: { type: "number", nullable: true },
   },
   required: ["productName", "price", "currency"],
 };
@@ -239,7 +243,7 @@ const GEMINI_EXTRACT_SCHEMA = {
  */
 export async function extractListingFromImage(
   imageBase64: { data: string; mimeType: string }
-): Promise<{ productName: string | null; price: number | null; currency: string | null }> {
+): Promise<{ productName: string | null; price: number | null; currency: string | null; discountPercent: number | null }> {
   const apiKey = getGeminiKey();
   const system =
     "You extract product-listing details from a photo (a screenshot of an online listing, a price tag, or a product photo). " +
@@ -247,8 +251,11 @@ export async function extractListingFromImage(
     "If the product name isn't visible or identifiable, return null for productName. " +
     "If no price is visible in the image, return null for price — never guess or invent one. " +
     "If a currency symbol or word is visible anywhere in the image (on the price tag or nearby), return its 3-letter code. Reference: EGP = \"ج.م\"/\"جنيه\"/\"LE\"/\"EGP\"; SAR = \"ر.س\"/\"ريال\"/\"SAR\"; AED = \"د.إ\"/\"درهم\"/\"AED\"; USD = \"$\"/\"USD\"; EUR = \"€\"/\"EUR\"; KWD = \"د.ك\"/\"دينار\"/\"KWD\". " +
-    "If no currency indicator is visible at all, return null — do not guess from context.";
-  const user = "Extract the product name, price, and currency from this photo.";
+    "If no currency indicator is visible at all, return null — do not guess from context. " +
+    "If a discount percentage is explicitly written in the image (e.g. \"خصم 20%\", \"-20%\", \"Sale 20% off\"), return it as a plain number (20 for 20%). " +
+    "If instead an original/crossed-out price and a lower current price are both shown, compute the percentage drop from original to current and return that number. " +
+    "If no discount is shown at all, return null for discountPercent — never guess one.";
+  const user = "Extract the product name, price, currency, and any discount percentage from this photo.";
 
   const body = {
     contents: [
@@ -287,6 +294,10 @@ export async function extractListingFromImage(
     productName: typeof parsed?.productName === "string" && parsed.productName.trim() ? parsed.productName.trim() : null,
     price: typeof parsed?.price === "number" && parsed.price > 0 ? parsed.price : null,
     currency: typeof parsed?.currency === "string" && parsed.currency.trim() ? parsed.currency.trim().toUpperCase() : null,
+    discountPercent:
+      typeof parsed?.discountPercent === "number" && parsed.discountPercent > 0 && parsed.discountPercent < 100
+        ? parsed.discountPercent
+        : null,
   };
 }
 

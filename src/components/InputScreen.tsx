@@ -4,7 +4,7 @@ import { getCategoryIcon, getIconByCategory } from "@/lib/categoryIcons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sparkles, Mic, Send, HelpCircle, X, ChevronDown, Check, Clock } from "lucide-react";
+import { Sparkles, Mic, Send, HelpCircle, X, ChevronDown, Check, Clock, Camera } from "lucide-react";
 import { getCachedFingerprint } from "@/lib/fingerprint";
 
 export function InputScreen() {
@@ -350,6 +350,18 @@ export function InputScreen() {
               </p>
             )}
           </div>
+
+          {/* Entry point: verify a listing photo (e.g. a Facebook ad) against
+              real live store prices — separate flow from the search box
+              above, see VerifyListingScreen. */}
+          <button
+            type="button"
+            onClick={() => navigate("verify-listing")}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-shary/30 bg-shary-light/40 py-2.5 text-[12px] font-semibold text-shary-dark transition-colors hover:border-shary hover:bg-shary-light"
+          >
+            <Camera className="h-4 w-4" />
+            {lang === "ar" ? "شكيت في سعر إعلان؟ ارفع صورته واتأكد" : "Not sure about a listing's price? Upload a photo to check"}
+          </button>
 
           {/* Submit */}
           <Button

@@ -1,5 +1,5 @@
 export type Language = "ar" | "en";
-export type Screen = "input" | "history" | "profile" | "login" | "guide" | "advisor" | "watchlist";
+export type Screen = "input" | "history" | "profile" | "login" | "guide" | "advisor" | "watchlist" | "verify-listing";
 
 export interface Currency {
   code: string;

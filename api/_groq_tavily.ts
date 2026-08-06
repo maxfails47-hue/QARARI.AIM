@@ -1457,14 +1457,16 @@ function buildStoreSearchUrl(domain: string, query: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(`site:${domain} ${query}`)}`;
 }
 
-// Amazon Associates tag — applied to every outbound amazon.* link (both the
-// store-search fallback and a direct Serper-found listing URL) so affiliate
-// commission is earned regardless of which path built the link. Never
-// touches non-Amazon domains.
+// Amazon Associates tag — Associates accounts are per-marketplace, and this
+// tag is only registered under Amazon.ae. Applying it to other amazon.*
+// domains (amazon.eg, amazon.sa, amazon.com, etc.) earns no commission there
+// and risks violating each program's operating agreement, so it's scoped to
+// amazon.ae only. Add more domains here once tags are registered for them.
 const AMAZON_AFFILIATE_TAG = "shary21-21";
+const AMAZON_AFFILIATE_DOMAINS = new Set(["amazon.ae"]);
 
 function applyAffiliateTag(url: string, domain: string): string {
-  if (!domain.startsWith("amazon.")) return url;
+  if (!AMAZON_AFFILIATE_DOMAINS.has(domain)) return url;
   try {
     const u = new URL(url);
     u.searchParams.set("tag", AMAZON_AFFILIATE_TAG);
