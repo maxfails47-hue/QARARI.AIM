@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import {
-  Shield, LogOut, BarChart3, DollarSign,
-  Loader2, RefreshCw, Users,
+  Shield, LogOut, Inbox, BarChart3, DollarSign, Check, X,
+  Loader2, RefreshCw, ExternalLink, Users, TrendingUp, Crown,
 } from "lucide-react";
 import { getStoredCreds, storeCreds, clearCreds, adminFetch } from "@/admin/adminApi";
 
-type Tab = "metrics" | "costs";
+type Tab = "requests" | "metrics" | "costs";
 
 // ---------------------------------------------------------------------------
 // Login
@@ -47,7 +47,7 @@ function AdminLogin({ onSuccess, expiredNotice }: { onSuccess: () => void; expir
           <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-lg">
             <Shield className="h-7 w-7 text-[#0B0B0F]" />
           </div>
-          <h1 className="font-serif text-xl font-bold text-amber-400">لوحة تحكم Shary</h1>
+          <h1 className="font-serif text-xl font-bold text-amber-400">لوحة تحكم Qarari.AI</h1>
           <p className="mt-1 text-xs text-zinc-500">Admin Dashboard</p>
         </div>
 
@@ -79,6 +79,174 @@ function AdminLogin({ onSuccess, expiredNotice }: { onSuccess: () => void; expir
           دخول
         </button>
       </form>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Requests tab (approve/reject subscription requests)
+// ---------------------------------------------------------------------------
+interface SubRequest {
+  id: string;
+  plan: string;
+  amount: number;
+  status: string;
+  screenshot_signed_url: string | null;
+  created_at: string;
+  ai_flagged?: boolean;
+  ai_flag_reason?: string | null;
+  users: { email: string; full_name: string | null } | null;
+}
+
+function RequestsTab() {
+  const [requests, setRequests] = useState<SubRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [rejectReasonFor, setRejectReasonFor] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await adminFetch("/api/admin?action=requests");
+      const data = await res.json().catch(() => null);
+      // Previously any failure here (401 unauthorized, 500 server error,
+      // even a non-JSON response) fell through to `data.requests || []`
+      // and rendered exactly the same empty state as "no pending
+      // requests" — so a real backend/auth error was indistinguishable
+      // from an actually-empty queue. Surface it instead.
+      if (!res.ok || !data) {
+        setLoadError(data?.error ? `${data.error}${data.message ? `: ${data.message}` : ""}` : `HTTP ${res.status}`);
+        setRequests([]);
+        return;
+      }
+      setRequests(data.requests || []);
+    } catch (e: any) {
+      setLoadError(e?.message || "network_error");
+      setRequests([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const approve = async (id: string) => {
+    setBusyId(id);
+    try {
+      await adminFetch("/api/admin?action=approve", { method: "POST", body: JSON.stringify({ requestId: id }) });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const reject = async (id: string) => {
+    setBusyId(id);
+    try {
+      await adminFetch("/api/admin?action=reject", { method: "POST", body: JSON.stringify({ requestId: id, reason: rejectReason || undefined }) });
+      setRejectReasonFor(null);
+      setRejectReason("");
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) {
+    return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <p className="text-sm text-red-400">حصل خطأ وإحنا بنجيب الطلبات: {loadError}</p>
+        <button onClick={load} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-amber-500/40">
+          <RefreshCw className="h-3.5 w-3.5" /> حاول تاني
+        </button>
+      </div>
+    );
+  }
+
+  if (!requests.length) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-16 text-center text-zinc-500">
+        <Inbox className="h-8 w-8" />
+        <p className="text-sm">مفيش طلبات اشتراك معلّقة دلوقتي</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {requests.map((r) => (
+        <div key={r.id} className="rounded-xl border border-amber-500/15 bg-zinc-900/60 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-zinc-100">{r.users?.full_name || r.users?.email || "—"}</p>
+              <p className="text-xs text-zinc-500">{r.users?.email}</p>
+              <p className="mt-1 text-xs text-amber-400">
+                اشتراك شهري — {r.amount} EGP
+              </p>
+              <p className="text-[11px] text-zinc-600">{new Date(r.created_at).toLocaleString("ar-EG")}</p>
+              {r.ai_flagged && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-orange-400">
+                  🚩 الذكاء الاصطناعي مش متأكد إن دي صورة إيصال — راجعها كويس
+                </p>
+              )}
+            </div>
+            {r.screenshot_signed_url && (
+              <a
+                href={r.screenshot_signed_url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-amber-500/40 hover:text-amber-400"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> صورة التحويل
+              </a>
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => approve(r.id)}
+              disabled={busyId === r.id}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs font-bold text-emerald-400 ring-1 ring-emerald-500/30 hover:bg-emerald-500/25 disabled:opacity-50"
+            >
+              <Check className="h-3.5 w-3.5" /> موافقة
+            </button>
+            <button
+              onClick={() => setRejectReasonFor(rejectReasonFor === r.id ? null : r.id)}
+              disabled={busyId === r.id}
+              className="flex items-center gap-1.5 rounded-lg bg-red-500/10 px-3 py-1.5 text-xs font-bold text-red-400 ring-1 ring-red-500/30 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" /> رفض
+            </button>
+          </div>
+
+          {rejectReasonFor === r.id && (
+            <div className="mt-3 flex gap-2">
+              <input
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="سبب الرفض (اختياري)"
+                className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs text-zinc-100 outline-none focus:border-amber-500/50"
+              />
+              <button
+                onClick={() => reject(r.id)}
+                disabled={busyId === r.id}
+                className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              >
+                تأكيد الرفض
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -148,11 +316,18 @@ function MetricsTab() {
         </button>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatCard icon={Users} label="إجمالي المستخدمين" value={data.totalUsers} accent />
+        <StatCard icon={Users} label="إجمالي المستخدمين" value={data.totalUsers} />
+        <StatCard icon={Crown} label="مشتركين بريميوم" value={data.premiumUsers} accent />
+        <StatCard icon={TrendingUp} label="معدل التحويل" value={`${data.conversionRate}%`} />
         <StatCard icon={Users} label="تسجيلات آخر 7 أيام" value={data.newSignupsThisWeek} />
         <StatCard icon={BarChart3} label="تحليلات هذا الشهر" value={data.analysesThisMonth} />
         <StatCard icon={BarChart3} label="إجمالي التحليلات" value={data.totalAnalyses} />
-        <StatCard icon={DollarSign} label="إجمالي الفلوس اللي وفّرها المستخدمين" value={`${data.totalMoneySaved.toLocaleString()} EGP`} accent />
+        <StatCard icon={DollarSign} label="MRR تقديري" value={`${data.mrrEstimate.toLocaleString()} EGP`} accent />
+        <StatCard icon={DollarSign} label="اشتراكات جديدة هذا الشهر" value={`${data.newMrrThisMonth.toLocaleString()} EGP`} />
+        <StatCard icon={DollarSign} label="إجمالي الفلوس اللي وفّرها المستخدمين" value={`${data.totalMoneySaved.toLocaleString()} EGP`} />
+        <StatCard icon={Inbox} label="طلبات معلّقة" value={data.pendingRequests} />
+        <StatCard icon={Check} label="موافق عليها هذا الشهر" value={data.approvedThisMonth} />
+        <StatCard icon={X} label="مرفوضة هذا الشهر" value={data.rejectedThisMonth} />
       </div>
     </div>
   );
@@ -283,7 +458,7 @@ function CostsTab() {
 // ---------------------------------------------------------------------------
 export default function AdminApp() {
   const [authed, setAuthed] = useState(() => !!getStoredCreds());
-  const [tab, setTab] = useState<Tab>("metrics");
+  const [tab, setTab] = useState<Tab>("requests");
   const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
@@ -305,6 +480,7 @@ export default function AdminApp() {
   }
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
+    { id: "requests", label: "طلبات الاشتراك", icon: Inbox },
     { id: "metrics", label: "مقاييس الأعمال", icon: BarChart3 },
     { id: "costs", label: "تكلفة الذكاء الاصطناعي", icon: DollarSign },
   ];
@@ -317,7 +493,7 @@ export default function AdminApp() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600">
               <Shield className="h-4 w-4 text-[#0B0B0F]" />
             </div>
-            <span className="font-serif text-sm font-bold text-amber-400">لوحة تحكم Shary</span>
+            <span className="font-serif text-sm font-bold text-amber-400">لوحة تحكم Qarari.AI</span>
           </div>
           <button
             onClick={() => { clearCreds(); setAuthed(false); }}
@@ -343,6 +519,7 @@ export default function AdminApp() {
           ))}
         </div>
 
+        {tab === "requests" && <RequestsTab />}
         {tab === "metrics" && <MetricsTab />}
         {tab === "costs" && <CostsTab />}
       </div>

@@ -1,4 +1,4 @@
-const STORAGE_KEY = "shary-admin-creds";
+const STORAGE_KEY = "qarari-admin-creds";
 
 export interface AdminCreds {
   username: string;

@@ -1,5 +1,6 @@
 export type Language = "ar" | "en";
-export type Screen = "input" | "history" | "profile" | "login" | "guide" | "advisor" | "watchlist" | "verify-listing";
+export type Verdict = "good" | "fair" | "bad";
+export type Screen = "input" | "reveal" | "report" | "history" | "profile" | "login" | "upgrade" | "compare" | "guide" | "advisor" | "watchlist" | "comparisonHistory";
 
 export interface Currency {
   code: string;
@@ -18,6 +19,9 @@ export const currencies: Currency[] = [
   { code: "KWD", enName: "Kuwaiti Dinar", arName: "دينار كويتي", enShort: "KWD", arShort: "دينار" },
 ];
 
+export const FREE_MONTHLY_LIMIT = 3; // matches FREE_TIER_LIMITS.scans in api/_planConfig.ts — used only as initial UI fallback before the real value loads from the server
+export const MONTHLY_PRICE = 150;
+export const INSTAPAY_NUMBER = "01025204455";
 export const SUPPORT_WHATSAPP = "201143494418";
 
 export interface BilingualText {
@@ -41,16 +45,13 @@ export interface Alternative {
   searchLinks?: { retailer: string; url: string }[];
 }
 
-// Legacy shape kept only so old rows already saved in the `analyses` table
-// (from before the plain-search pivot) still type-check when HistoryScreen
-// sums up their stored moneySaved for the "total savings" stat. Nothing in
-// the app creates new records with this shape anymore — no offered price,
-// no verdict, no negotiation script. See CHANGES.md for the pivot notes.
 export interface AnalysisResult {
   id: string;
   product: string;
+  offeredPrice: number;
   currency: string;
   condition?: string;
+  verdict: Verdict;
   // Nullable: the backend now allows the AI to return null for these when it
   // genuinely has no reliable pricing data, instead of inventing a number.
   marketFairPriceMin: number | null;
@@ -60,7 +61,18 @@ export interface AnalysisResult {
   // the current market price range in natural language (new vs used, min/max).
   marketPriceSummary: BilingualText;
   moneySaved: number | null;
+  reasoningPoints: BilingualArray;
+  preRecommendation: BilingualText;
+  futureCompatibility: BilingualText;
+  regretLevel: "low" | "medium" | "high";
+  regretJustification: BilingualText;
+  pros: BilingualArray;
+  cons: BilingualArray;
+  hiddenRisks: BilingualArray;
+  finalTip: BilingualText;
   betterAlternatives: Alternative[];
+  negotiationScript: BilingualText;
+  negotiationScriptVariants?: { polite: BilingualText; firm: BilingualText };
   communityInsights?: {
     analyzedCount: number;
     recentPrices: number[];
@@ -74,7 +86,15 @@ export interface AnalysisResult {
   // name (see buildRetailerSearchLinks in api/_groq_tavily.ts). No price is
   // fetched or shown here; each link just opens that store's own search
   // results page for the product.
-  retailerPrices?: { retailer: string; url: string }[];
+  retailerPrices?: {
+    retailer: string;
+    url: string;
+    price?: number | null;
+    currency?: string;
+    inStock?: boolean | null;
+    lastChecked?: string;
+  }[];
+  productImage?: string | null;
   createdAt: number;
 }
 
@@ -82,6 +102,32 @@ export interface AnalysisResult {
 // this once a B.TECH affiliate/commission deal is confirmed. Kept as a
 // simple constant since the frontend can't read server env vars directly.
 export const SHOW_BTECH_COMPARISON = false;
+
+export interface CompareRow {
+  category: BilingualText;
+  valueA: BilingualText;
+  valueB: BilingualText;
+  winner: "A" | "B" | "tie";
+}
+
+export interface CompareResult {
+  productA: string;
+  productB: string;
+  rows: CompareRow[];
+  finalRecommendation: BilingualText;
+  priceA: number;
+  priceB: number;
+  currency: string;
+  resaleValueA?: number;
+  resaleValueB?: number;
+  resaleValueTimeframe?: string;
+  warrantyScoreA?: number;
+  warrantyScoreB?: number;
+  marketFairPriceMinA?: number | null;
+  marketFairPriceMaxA?: number | null;
+  marketFairPriceMinB?: number | null;
+  marketFairPriceMaxB?: number | null;
+}
 
 export interface UserProfile {
   id: string;
@@ -91,6 +137,14 @@ export interface UserProfile {
   country: string;
   phone: string;
   interests: string[];
+  tier: "free" | "premium";
+  currentPlanName?: string;
+  chatMessagesLimit?: number;
+  chatMessagesUsed?: number;
+  priceAlertsLimit?: number;
+  priceAlertsUsed?: number;
+  canExportPdf?: boolean;
+  subscriptionEndDate: number | null;
   referralCode: string;
   inviteCount: number;
 }

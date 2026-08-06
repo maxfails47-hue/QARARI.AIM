@@ -40,6 +40,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Non-fatal by design: the caller (InputScreen) treats any failure here
     // as "couldn't read the photo" and simply falls back to manual entry —
     // never blocks the form.
-    return res.status(200).json({ productName: null, price: null, currency: null, discountPercent: null });
+    return res.status(200).json({ productName: null, price: null, currency: null });
   }
 }

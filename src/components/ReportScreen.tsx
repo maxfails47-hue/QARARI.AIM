@@ -16,18 +16,16 @@ import {
 } from "lucide-react";
 
 // ---- "Search the best price yourself" (Jumia/Amazon/Noon/optionally B.TECH) ----
-// Renders whenever the report carries at least one store link (built
-// server-side in api/analyze.ts as pure search URLs — see
-// buildRetailerSearchLinks in api/_groq_tavily.ts). This is intentionally
-// NOT a price comparison: each link takes the person to that store's own
-// search results page for the product NAME, never a specific listing or
-// price, since we can't guarantee any single URL still matches the right
-// product or price by the time it's opened.
+// Renders whenever the report carries at least one store link. Each entry
+// now also carries a REAL live price/stock status when api/analyze.ts
+// managed to resolve one (see api/_priceResolver.ts) — shown next to the
+// link when available; falls back to a plain "view current price" link
+// when a store's price couldn't be read live.
 function RetailerSearchLinks({
   retailerPrices,
   lang,
 }: {
-  retailerPrices: { retailer: string; url: string }[];
+  retailerPrices: { retailer: string; url: string; price?: number | null; currency?: string; inStock?: boolean | null }[];
   lang: "ar" | "en";
 }) {
   const visibleLinks = retailerPrices.filter(
@@ -35,6 +33,11 @@ function RetailerSearchLinks({
   );
 
   if (visibleLinks.length < 1) return null;
+
+  const cheapestPrice = visibleLinks.reduce<number | null>((min, rp) => {
+    if (typeof rp.price !== "number") return min;
+    return min === null ? rp.price : Math.min(min, rp.price);
+  }, null);
 
   return (
     <div className="mb-4 rounded-xl border border-amber-500/15 bg-[#0B0B0F] p-5">
@@ -44,39 +47,62 @@ function RetailerSearchLinks({
       </h2>
       <p className="mt-1 mb-4 text-xs text-zinc-500">
         {lang === "ar"
-          ? "مقارنة السعر أونلاين مش دايمًا دقيقة 100%، فبنديّك رابط بحث مباشر في أكبر المتاجر عشان تشوف السعر الحالي بنفسك."
-          : "Online price comparisons aren't always 100% accurate, so we give you a direct search link to the biggest stores so you can see the current price yourself."}
+          ? "الأسعار دي حقيقية اتقرت من صفحات المتاجر نفسها دلوقتي، مش تقدير — بس ينفع تتغير قبل ما تدوس اشتري."
+          : "These prices were read live from each store's own page just now — not an estimate — but they can still change before checkout."}
       </p>
 
       <div className="space-y-2.5">
-        {visibleLinks.map((rp, i) => (
-          <a
-            key={i}
-            href={rp.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-between rounded-xl border border-zinc-700 bg-zinc-800/40 p-3.5 transition-colors hover:bg-zinc-800/70"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
-                {rp.retailer.slice(0, 2).toUpperCase()}
-              </span>
-              <div>
-                <span className="block text-sm font-bold text-zinc-100">{rp.retailer}</span>
-                <span className="block text-xs text-zinc-500">
-                  {lang === "ar" ? "شوف السعر الحالي" : "View current price"}
+        {visibleLinks.map((rp, i) => {
+          const hasPrice = typeof rp.price === "number";
+          const isCheapest = hasPrice && cheapestPrice !== null && rp.price === cheapestPrice;
+          return (
+            <a
+              key={i}
+              href={rp.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex items-center justify-between rounded-xl border p-3.5 transition-colors ${
+                isCheapest ? "border-amber-400/50 bg-amber-500/10" : "border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800/70"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
+                  {rp.retailer.slice(0, 2).toUpperCase()}
                 </span>
+                <div>
+                  <span className="flex items-center gap-1.5 text-sm font-bold text-zinc-100">
+                    {rp.retailer}
+                    {isCheapest && (
+                      <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold text-[#0B0B0F]">
+                        {lang === "ar" ? "الأرخص" : "Cheapest"}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-xs text-zinc-500">
+                    {hasPrice
+                      ? rp.inStock === false
+                        ? lang === "ar" ? "غير متوفر حاليًا" : "Currently out of stock"
+                        : lang === "ar" ? "متوفر" : "In stock"
+                      : lang === "ar" ? "شوف السعر الحالي" : "View current price"}
+                  </span>
+                </div>
               </div>
-            </div>
-            <ExternalLink className="h-4 w-4 shrink-0 text-zinc-500" />
-          </a>
-        ))}
+              {hasPrice ? (
+                <div className="text-end">
+                  <p className="font-bold text-zinc-100">{Math.round(rp.price as number).toLocaleString()} {rp.currency}</p>
+                </div>
+              ) : (
+                <ExternalLink className="h-4 w-4 shrink-0 text-zinc-500" />
+              )}
+            </a>
+          );
+        })}
       </div>
 
       <p className="mt-3.5 text-[11px] leading-relaxed text-zinc-500">
         {lang === "ar"
-          ? "كل لينك بيوديك مباشرة لأول منتج فعلي لقيناه في نتائج البحث بالمتجر ده — مش صفحة بحث عامة. لو مفيش نتيجة مباشرة، بنورّيك صفحة البحث في المتجر بدل كده. بعض الروابط شراكة تجارية، وده مش بيأثر على ترتيب أو تقييم 'قرار' للصفقة."
-          : "Each link takes you straight to the actual first product we found in that store's search results — not a generic search page. If we couldn't find a direct match, we fall back to that store's search page instead. Some links are commercial partnerships; this doesn't affect Qarari's ranking or rating of the deal."}
+          ? "كل لينك بيوديك مباشرة لأول منتج فعلي لقيناه في نتائج البحث بالمتجر ده — مش صفحة بحث عامة. لو معرفناش نقرا السعر حيًا من صفحة المتجر، بنورّيك اللينك برضه من غير رقم بدل ما نخمّن. بعض الروابط شراكة تجارية، وده مش بيأثر على ترتيب أو تقييم 'قرار' للصفقة."
+          : "Each link takes you straight to the actual first product we found in that store's search results — not a generic search page. If we couldn't read a live price off the store's page, we still show the link without a number rather than guess. Some links are commercial partnerships; this doesn't affect Qarari's ranking or rating of the deal."}
       </p>
     </div>
   );
@@ -332,8 +358,19 @@ export function ReportScreen() {
       {/* Product Header */}
       <div className="mb-6 flex items-center gap-4">
         <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-800 via-zinc-900 to-black shadow-lg ring-1 ring-amber-500/20">
-          <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/10 via-transparent to-transparent" />
-          <ProductIcon className="relative h-10 w-10 text-amber-400/90" strokeWidth={1.5} />
+          {report.productImage ? (
+            <img
+              src={report.productImage}
+              alt={report.product}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              className="relative h-full w-full object-contain bg-white p-1.5"
+            />
+          ) : (
+            <>
+              <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/10 via-transparent to-transparent" />
+              <ProductIcon className="relative h-10 w-10 text-amber-400/90" strokeWidth={1.5} />
+            </>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-serif text-2xl font-bold text-amber-400">{report.product}</h1>
@@ -383,7 +420,7 @@ export function ReportScreen() {
       </div>
 
       {/* "Search the best price yourself" — Jumia/Amazon/Noon/optionally
-          B.TECH, pure search links built server-side, no price shown */}
+          B.TECH, with a real live price shown per store when resolved */}
       {report.retailerPrices && report.retailerPrices.length > 0 && (
         <RetailerSearchLinks retailerPrices={report.retailerPrices} lang={lang} />
       )}

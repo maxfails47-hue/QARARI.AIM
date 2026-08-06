@@ -3,13 +3,17 @@ import { Header } from "@/components/Header";
 import { Toast } from "@/components/Toast";
 import { InstallBanner } from "@/components/InstallBanner";
 import { DecisionInput } from "@/components/DecisionInput";
+import { RevealScreen } from "@/components/RevealScreen";
+import { ReportScreen } from "@/components/ReportScreen";
 import { HistoryScreen } from "@/components/HistoryScreen";
 import { ProfileScreen } from "@/components/ProfileScreen";
 import { LoginScreen } from "@/components/LoginScreen";
+import { UpgradeScreen } from "@/components/UpgradeScreen";
+import { CompareScreen } from "@/components/CompareScreen";
 import { GuideScreen } from "@/components/GuideScreen";
 import { AdvisorScreen } from "@/components/AdvisorScreen";
 import { WatchlistScreen } from "@/components/WatchlistScreen";
-import { VerifyListingScreen } from "@/components/VerifyListingScreen";
+import { ComparisonHistoryScreen } from "@/components/ComparisonHistoryScreen";
 import { OnboardingScreen } from "@/components/OnboardingScreen";
 import { HelpSheet } from "@/components/HelpSheet";
 import { HelpCircle } from "lucide-react";
@@ -21,20 +25,28 @@ function ScreenRouter() {
   switch (screen) {
     case "input":
       return <DecisionInput />;
+    case "reveal":
+      return <RevealScreen />;
+    case "report":
+      return <ReportScreen />;
     case "history":
       return <HistoryScreen />;
     case "profile":
       return <ProfileScreen />;
     case "login":
       return <LoginScreen />;
+    case "upgrade":
+      return <UpgradeScreen />;
+    case "compare":
+      return <CompareScreen />;
     case "guide":
       return <GuideScreen />;
     case "advisor":
       return <AdvisorScreen />;
     case "watchlist":
       return <WatchlistScreen />;
-    case "verify-listing":
-      return <VerifyListingScreen />;
+    case "comparisonHistory":
+      return <ComparisonHistoryScreen />;
 
     default:
       return <DecisionInput />;
@@ -46,7 +58,7 @@ function ScreenRouter() {
 // auth/upgrade flows where it would just be noise.
 function HelpFab() {
   const { screen, helpSheetOpen, replayOnboarding, t } = useApp();
-  if (screen === "login") return null;
+  if (screen === "login" || screen === "upgrade") return null;
   return (
     <button
       // Replays the full 6-slide onboarding (Section 1) — this is now the
@@ -56,7 +68,7 @@ function HelpFab() {
       onClick={() => replayOnboarding()}
       aria-label={t("helpButtonLabel")}
       title={t("helpButtonLabel")}
-      className={`fixed bottom-5 z-30 flex h-11 w-11 items-center justify-center rounded-full border-2 border-shary/60 bg-[#FFFFFF] text-shary-dark shadow-lg shadow-black/40 transition-transform hover:scale-105 active:scale-95 ltr:right-5 rtl:left-5 ${
+      className={`fixed bottom-5 z-30 flex h-11 w-11 items-center justify-center rounded-full border-2 border-amber-500/60 bg-[#0B0B0F] text-amber-400 shadow-lg shadow-black/40 transition-transform hover:scale-105 active:scale-95 ltr:right-5 rtl:left-5 ${
         helpSheetOpen ? "opacity-0 pointer-events-none" : "opacity-100"
       }`}
     >
@@ -73,16 +85,16 @@ function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FFFFFF] text-zinc-900 antialiased">
-      <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-b from-shary-dark/10 via-transparent to-transparent" />
+    <div className="min-h-screen bg-[#0B0B0F] text-zinc-100 antialiased">
+      <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-b from-amber-950/10 via-transparent to-transparent" />
       <div className="relative z-10">
         <Header />
         <main className="pb-8">
           <ScreenRouter />
         </main>
-        <footer className="border-t border-shary/10 px-4 py-6 text-center">
+        <footer className="border-t border-amber-500/10 px-4 py-6 text-center">
           <p className="text-xs text-zinc-600">
-            Shary — {new Date().getFullYear()}
+            Qarari.AI — {new Date().getFullYear()}
           </p>
         </footer>
       </div>

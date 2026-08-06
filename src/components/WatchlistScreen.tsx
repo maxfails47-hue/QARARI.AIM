@@ -98,23 +98,23 @@ export function WatchlistScreen() {
       <div className="mb-6 flex items-center gap-3">
         <button
           onClick={() => navigate("input")}
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-zinc-400 transition-colors hover:text-shary-dark"
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800/50 text-zinc-400 transition-colors hover:text-amber-400"
         >
           {dir === "rtl" ? <ChevronLeft className="h-5 w-5 rotate-180" /> : <ChevronLeft className="h-5 w-5" />}
         </button>
-        <h1 className="text-2xl font-bold text-shary-dark">{t("watchlistTitle")}</h1>
+        <h1 className="font-serif text-2xl font-bold text-amber-400">{t("watchlistTitle")}</h1>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <span className="h-6 w-6 animate-spin rounded-full border-2 border-shary border-t-transparent" />
+          <span className="h-6 w-6 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
         </div>
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 py-16 text-center">
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-700 py-16 text-center">
           <Bell className="mb-3 h-12 w-12 text-zinc-700" />
           <p className="text-sm font-medium text-zinc-400">{t("noWatchlist")}</p>
           <p className="mt-1 text-xs text-zinc-600">{t("noWatchlistDesc")}</p>
-          <Button onClick={() => navigate("input")} className="mt-4 bg-shary text-[#FFFFFF] hover:bg-shary">
+          <Button onClick={() => navigate("input")} className="mt-4 bg-amber-500 text-[#0B0B0F] hover:bg-amber-400">
             <Sparkles className="h-4 w-4" /> {t("newDecision")}
           </Button>
         </div>
@@ -128,12 +128,12 @@ export function WatchlistScreen() {
               <div
                 key={row.id}
                 className={`rounded-xl border p-4 transition-colors ${
-                  dropped ? "border-emerald-500/30 bg-emerald-500/5" : "border-zinc-200 bg-white/60"
+                  dropped ? "border-emerald-500/30 bg-emerald-500/5" : "border-zinc-800 bg-zinc-900/60"
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-bold text-zinc-900">{row.product}</h3>
+                    <h3 className="truncate text-sm font-bold text-zinc-100">{row.product}</h3>
                     <p className="mt-1 text-xs text-zinc-500">
                       {t("savedPriceLabel")}: {row.saved_price.toLocaleString()} {cShort}
                     </p>
@@ -157,7 +157,7 @@ export function WatchlistScreen() {
                     onClick={() => stopTracking(row)}
                     disabled={removingId === row.id}
                     title={t("stopTracking")}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-50 text-zinc-400 transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:opacity-50"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-zinc-400 transition-colors hover:bg-red-500/15 hover:text-red-400 disabled:opacity-50"
                   >
                     {removingId === row.id ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" />

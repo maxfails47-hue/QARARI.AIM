@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { Globe, History, User, Plus, Bell, MoreVertical } from "lucide-react";
+import { Globe, History, User, Sparkles, Plus, GitCompare, Bell, GitCompareArrows, MoreVertical } from "lucide-react";
 import { HeaderInstallButton } from "@/components/HeaderInstallButton";
 
 export function Header() {
-  const { lang, setLang, t, navigate, screen, user } = useApp();
+  const { lang, setLang, t, navigate, screen, isPremium, user } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -26,18 +26,18 @@ export function Header() {
   }, [menuOpen]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-shary/20 bg-[#FFFFFF]/95 backdrop-blur-md">
+    <header className="sticky top-0 z-40 border-b border-amber-500/20 bg-[#0B0B0F]/95 backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         <button
           onClick={() => navigate("input")}
           className="flex items-center gap-2 transition-opacity hover:opacity-80"
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-shary shadow-lg shadow-shary/30">
-            <span className="text-lg font-extrabold text-white">S</span>
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-lg shadow-amber-500/20">
+            <Sparkles className="h-5 w-5 text-[#0B0B0F]" />
           </div>
           <div className="flex flex-col items-start leading-none">
-            <span className="text-lg font-bold text-shary">Shary</span>
-            <span className="text-[10px] font-medium text-zinc-500">Shop Smarter</span>
+            <span className="font-serif text-lg font-bold text-amber-400">Qarari</span>
+            <span className="text-[10px] font-medium text-zinc-500">AI Analyzer</span>
           </div>
         </button>
 
@@ -45,16 +45,25 @@ export function Header() {
           <button
             onClick={() => navigate("input")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              screen === "input" ? "bg-shary/15 text-shary-dark" : "text-zinc-400 hover:bg-zinc-50 hover:text-shary-dark"
+              screen === "input" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
             }`}
             title={t("newDecision")}
           >
             <Plus className="h-5 w-5" />
           </button>
           <button
+            onClick={() => navigate("compare")}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+              screen === "compare" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
+            }`}
+            title={t("compareProducts")}
+          >
+            <GitCompare className="h-5 w-5" />
+          </button>
+          <button
             onClick={() => navigate("history")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              screen === "history" ? "bg-shary/15 text-shary-dark" : "text-zinc-400 hover:bg-zinc-50 hover:text-shary-dark"
+              screen === "history" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
             }`}
             title={t("history")}
           >
@@ -63,7 +72,7 @@ export function Header() {
           <button
             onClick={() => navigate(user ? "profile" : "login")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              screen === "profile" || screen === "login" ? "bg-shary/15 text-shary-dark" : "text-zinc-400 hover:bg-zinc-50 hover:text-shary-dark"
+              screen === "profile" || screen === "login" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
             }`}
             title={t("profile")}
           >
@@ -72,14 +81,14 @@ export function Header() {
 
           {/* Everything occasional/secondary lives behind this single "More"
               button instead of each getting its own permanent header icon —
-              install prompt, watchlist, language. */}
+              install prompt, premium comparison history, watchlist, language. */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((v) => !v)}
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                menuOpen || screen === "watchlist"
-                  ? "bg-shary/15 text-shary-dark"
-                  : "text-zinc-400 hover:bg-zinc-50 hover:text-shary-dark"
+                menuOpen || screen === "watchlist" || screen === "comparisonHistory"
+                  ? "bg-amber-500/15 text-amber-400"
+                  : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
               }`}
               title={t("moreMenu")}
               aria-label={t("moreMenu")}
@@ -89,34 +98,48 @@ export function Header() {
             </button>
 
             {menuOpen && (
-              <div className="absolute top-11 z-50 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl ltr:right-0 rtl:left-0">
+              <div className="absolute top-11 z-50 w-52 rounded-xl border border-zinc-800 bg-zinc-900 p-1.5 shadow-2xl ltr:right-0 rtl:left-0">
                 {user && (
                   <button
                     onClick={() => {
                       navigate("watchlist");
                       setMenuOpen(false);
                     }}
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm transition-colors hover:bg-zinc-50/70 ${
-                      screen === "watchlist" ? "text-shary-dark" : "text-zinc-800"
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm transition-colors hover:bg-zinc-800/70 ${
+                      screen === "watchlist" ? "text-amber-400" : "text-zinc-200"
                     }`}
                   >
                     <Bell className="h-4 w-4 shrink-0" />
                     {t("watchlistTitle")}
                   </button>
                 )}
+                {isPremium && (
+                  <button
+                    onClick={() => {
+                      navigate("comparisonHistory");
+                      setMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm transition-colors hover:bg-zinc-800/70 ${
+                      screen === "comparisonHistory" ? "text-amber-400" : "text-zinc-200"
+                    }`}
+                  >
+                    <GitCompareArrows className="h-4 w-4 shrink-0" />
+                    {t("comparisonHistory")}
+                  </button>
+                )}
 
-                {user && <div className="my-1 h-px bg-zinc-50" />}
+                {(user || isPremium) && <div className="my-1 h-px bg-zinc-800" />}
 
                 <HeaderInstallButton variant="menuItem" onAfterClick={() => setMenuOpen(false)} />
 
-                <div className="my-1 h-px bg-zinc-50" />
+                <div className="my-1 h-px bg-zinc-800" />
 
                 <button
                   onClick={() => {
                     setLang(lang === "ar" ? "en" : "ar");
                     setMenuOpen(false);
                   }}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm text-zinc-800 transition-colors hover:bg-zinc-50/70"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm text-zinc-200 transition-colors hover:bg-zinc-800/70"
                 >
                   <Globe className="h-4 w-4 shrink-0" />
                   {lang === "ar" ? "English" : "العربية"}

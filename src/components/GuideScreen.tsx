@@ -1,5 +1,5 @@
 import { useApp } from "@/lib/AppContext";
-import { ChevronLeft, Zap, TrendingUp, Check } from "lucide-react";
+import { ChevronLeft, Zap, TrendingUp, Crown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function GuideScreen() {
@@ -25,8 +25,8 @@ export function GuideScreen() {
       descEn: "Ask the advisor anything about shopping and get personalized advice",
     },
     {
-      titleAr: "💬 دردشة مع المساعد",
-      titleEn: "💬 Chat with the Advisor",
+      titleAr: "💬 150 رسالة شهريًا (بريميوم)",
+      titleEn: "💬 150 Messages/Month (Premium)",
       descAr: "تحدث مع المساعد وهو يتذكر اهتماماتك",
       descEn: "Chat with the advisor who remembers your interests",
     },
@@ -42,7 +42,7 @@ export function GuideScreen() {
     <div className="mx-auto max-w-3xl px-4 py-6">
       <button
         onClick={() => navigate("input")}
-        className="mb-6 flex items-center gap-1 text-sm text-zinc-400 hover:text-shary-dark"
+        className="mb-6 flex items-center gap-1 text-sm text-zinc-400 hover:text-amber-400"
       >
         <ChevronLeft className={`h-4 w-4 ${lang === "ar" ? "rotate-180" : ""}`} />
         {t("back")}
@@ -50,11 +50,11 @@ export function GuideScreen() {
 
       {/* Hero Section */}
       <div className="mb-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-shary to-shary-dark shadow-xl shadow-shary/20">
-          <Zap className="h-8 w-8 text-[#FFFFFF]" />
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-xl shadow-amber-500/20">
+          <Zap className="h-8 w-8 text-[#0B0B0F]" />
         </div>
-        <h1 className="text-3xl font-bold text-shary-dark">
-          {lang === "ar" ? "مرحباً بك في شاري" : "Welcome to Shary"}
+        <h1 className="font-serif text-3xl font-bold text-amber-400">
+          {lang === "ar" ? "مرحباً بك في قراري" : "Welcome to Qarari"}
         </h1>
         <p className="mt-2 text-sm text-zinc-400">
           {lang === "ar"
@@ -64,40 +64,59 @@ export function GuideScreen() {
       </div>
 
       {/* Main Value Proposition */}
-      <div className="mb-8 rounded-2xl border border-shary/30 bg-gradient-to-b from-shary/10 to-transparent p-6 text-center">
-        <p className="text-lg font-bold text-shary-dark">
+      <div className="mb-8 rounded-2xl border border-amber-500/30 bg-gradient-to-b from-amber-500/10 to-transparent p-6 text-center">
+        <p className="text-lg font-bold text-amber-400">
           {lang === "ar"
             ? "💰 قرار شراء واحد صحيح يوفر لك آلاف الجنيهات"
             : "💰 One right purchase decision saves you thousands"}
         </p>
-        <p className="mt-2 text-sm text-zinc-700">
+        <p className="mt-2 text-sm text-zinc-300">
           {lang === "ar"
-            ? "وشاري مجاني بالكامل من غير أي حدود"
-            : "And Shary is completely free, with no limits"}
+            ? "والاشتراك البريميوم بـ 150 جنيه فقط يوفر لك أكثر من ذلك بكتير"
+            : "And premium subscription at just 150 EGP saves you much more"}
         </p>
       </div>
 
       {/* Features Grid */}
       <div className="mb-8 space-y-3">
-        <h2 className="text-xl font-bold text-shary-dark">
+        <h2 className="font-serif text-xl font-bold text-amber-400">
           {lang === "ar" ? "🎯 المميزات الرئيسية" : "🎯 Main Features"}
         </h2>
         {features.map((feature, i) => (
-          <div key={i} className="rounded-xl border border-shary/15 bg-white/60 p-4">
-            <p className="font-bold text-shary-dark">
+          <div key={i} className="rounded-xl border border-amber-500/15 bg-zinc-900/60 p-4">
+            <p className="font-bold text-amber-400">
               {lang === "ar" ? feature.titleAr : feature.titleEn}
             </p>
-            <p className="mt-1 text-sm text-zinc-700">
+            <p className="mt-1 text-sm text-zinc-300">
               {lang === "ar" ? feature.descAr : feature.descEn}
             </p>
           </div>
         ))}
       </div>
 
+      {/* Premium Benefits */}
+      <div className="mb-8 rounded-2xl border border-amber-500/20 bg-gradient-to-b from-amber-500/5 to-transparent p-6 text-center">
+        <Crown className="mx-auto mb-3 h-8 w-8 text-amber-400" />
+        <h2 className="font-serif text-xl font-bold text-amber-400">
+          {lang === "ar" ? "افتح كل إمكانيات قراري" : "Unlock the full power of Qarari"}
+        </h2>
+        <p className="mt-2 text-sm text-zinc-400">
+          {lang === "ar"
+            ? "تحليلات ومقارنات ورسائل أكتر مع المساعد الذكي، وذاكرة تتذكر اهتماماتك"
+            : "More analyses, comparisons, and advisor messages — plus smart memory that remembers your interests"}
+        </p>
+        <Button
+          onClick={() => navigate("upgrade")}
+          className="mt-5 w-full bg-gradient-to-r from-amber-400 to-amber-600 text-[#0B0B0F] font-bold hover:from-amber-300 hover:to-amber-500"
+        >
+          {lang === "ar" ? "👑 اشترك الآن" : "👑 Subscribe Now"}
+        </Button>
+      </div>
+
       {/* How It Works */}
-      <div className="mb-8 rounded-xl border border-shary/15 bg-white/60 p-6">
-        <h2 className="mb-4 text-lg font-bold text-shary-dark">
-          {lang === "ar" ? "🚀 كيف تستخدم شاري؟" : "🚀 How to Use Shary?"}
+      <div className="mb-8 rounded-xl border border-amber-500/15 bg-zinc-900/60 p-6">
+        <h2 className="mb-4 font-serif text-lg font-bold text-amber-400">
+          {lang === "ar" ? "🚀 كيف تستخدم قراري؟" : "🚀 How to Use Qarari?"}
         </h2>
         <div className="space-y-3">
           {[
@@ -128,10 +147,10 @@ export function GuideScreen() {
             },
           ].map((step, i) => (
             <div key={i} className="flex gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-shary/15 text-sm font-bold text-shary-dark">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-sm font-bold text-amber-400">
                 {step.num}
               </div>
-              <p className="text-sm text-zinc-700">
+              <p className="text-sm text-zinc-300">
                 {lang === "ar" ? step.ar : step.en}
               </p>
             </div>
@@ -143,9 +162,16 @@ export function GuideScreen() {
       <div className="space-y-3">
         <Button
           onClick={() => navigate("input")}
-          className="w-full bg-gradient-to-r from-shary to-shary-dark text-[#FFFFFF] font-bold hover:from-shary hover:to-shary-dark"
+          className="w-full bg-gradient-to-r from-amber-400 to-amber-600 text-[#0B0B0F] font-bold hover:from-amber-300 hover:to-amber-500"
         >
           {lang === "ar" ? "🚀 ابدأ الآن" : "🚀 Start Now"}
+        </Button>
+        <Button
+          onClick={() => navigate("upgrade")}
+          variant="outline"
+          className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+        >
+          {lang === "ar" ? "👑 اشترك بريميوم" : "👑 Subscribe Premium"}
         </Button>
       </div>
     </div>

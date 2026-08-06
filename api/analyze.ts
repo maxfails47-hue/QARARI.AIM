@@ -12,6 +12,7 @@ import {
   type AlternativeWithLinks,
 } from "./_groq_tavily.js";
 import { logAiUsage } from "./_costTracking.js";
+import { resolvePricesForLinks } from "./_priceResolver.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep, logEnvPresence } from "./_logger.js";
 import { FREE_TIER_LIMITS, DEFAULT_PREMIUM_LIMITS, FAIR_USE_CONFIG, getBurstLimit } from "./_planConfig.js";
 
@@ -37,8 +38,8 @@ function checkFairUseRateLimit(identifier: string, planName: string, monthlyQuot
     return {
       allowed: false,
       message: {
-        ar: "أنت بتستخدم شاري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
-        en: "You're using Shary at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are protected.",
+        ar: "أنت بتستخدم قراري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
+        en: "You're using Qarari at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are protected.",
       },
     };
   }
@@ -60,8 +61,8 @@ function checkFairUseRateLimit(identifier: string, planName: string, monthlyQuot
     return {
       allowed: false,
       message: {
-        ar: "أنت بتستخدم شاري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
-        en: "You're using Shary at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are protected.",
+        ar: "أنت بتستخدم قراري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
+        en: "You're using Qarari at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are protected.",
       },
     };
   }
@@ -150,6 +151,7 @@ interface MarketCacheEntry {
   marketPriceSummary: { ar: string; en: string } | null;
   retailerPrices: any[];
   betterAlternatives: AlternativeWithLinks[];
+  productImage: string | null;
 }
 
 function extractMarketData(parsed: any): MarketCacheEntry {
@@ -160,6 +162,7 @@ function extractMarketData(parsed: any): MarketCacheEntry {
     marketPriceSummary: parsed.marketPriceSummary ?? null,
     retailerPrices: Array.isArray(parsed.retailerPrices) ? parsed.retailerPrices : [],
     betterAlternatives: Array.isArray(parsed.betterAlternatives) ? parsed.betterAlternatives : [],
+    productImage: typeof parsed.productImage === "string" ? parsed.productImage : null,
   };
 }
 
@@ -755,13 +758,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log("[/api/analyze] Fair price range:", marketPrice.min, "-", marketPrice.max, "| mid:", marketPrice.mid);
 
       // ---- STEP 1b: retailer direct listing links (Jumia/Amazon/Noon, etc.) ----
-      // Serper's ONLY job — direct listing links for the main product.
-      // Never used for pricing.
       let retailerPrices: any[] = [];
       try {
         retailerPrices = await fetchMainProductRetailerLinks(searchProductName, currency, cond);
       } catch (e) {
         console.error("[/api/analyze] Building retailer search links failed (non-fatal):", e);
+      }
+
+      // ---- STEP 1b-2: resolve REAL live prices for those links, then use the
+      // actual cheapest/most-expensive price found as the fair price range —
+      // replacing the AI-estimated marketPrice above. Ported from Shary's
+      // live price-comparison engine (api/_priceResolver.ts): opens each
+      // retailer link for real and reads JSON-LD/meta/AI-extracted price off
+      // the live page. Never fabricates — if a store's price can't be read,
+      // it's excluded rather than guessed. Falls back to the AI estimate
+      // from STEP 1a only if literally zero stores resolve a real price, so
+      // the range is never null.
+      let productImage: string | null = null;
+      try {
+        logStep("Resolving live retailer prices...");
+        const resolved = await resolvePricesForLinks(retailerPrices, currency);
+        const withPrice = resolved.filter((r) => typeof r.price === "number");
+
+        if (withPrice.length > 0) {
+          const prices = withPrice.map((r) => r.price as number);
+          const min = Math.min(...prices);
+          const max = Math.max(...prices);
+          marketPrice.min = min;
+          marketPrice.max = max;
+          marketPrice.mid = Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+          // The AI's own summary sentence was written for its ESTIMATED
+          // range — replace it with a plain, deterministic sentence built
+          // from the real numbers so the text never contradicts the figures
+          // shown above it.
+          marketPrice.summary = {
+            ar: `بناءً على أسعار حقيقية من ${withPrice.length} ${withPrice.length === 1 ? "متجر" : "متاجر"} تم فحصها الآن، يتراوح السعر بين ${Math.round(min).toLocaleString()} و${Math.round(max).toLocaleString()} ${currency}.`,
+            en: `Based on real prices just checked across ${withPrice.length} store${withPrice.length === 1 ? "" : "s"}, the price ranges from ${Math.round(min).toLocaleString()} to ${Math.round(max).toLocaleString()} ${currency}.`,
+          };
+          console.log(`[/api/analyze] Real price range from ${withPrice.length} stores: ${min}-${max} (was AI estimate before override)`);
+        } else {
+          console.warn("[/api/analyze] No store resolved a real price — keeping AI-estimated fair price range.");
+        }
+
+        // Product photo: prefer the cheapest resolved store's image, else
+        // any resolved store's image. Never generated — null if none found.
+        const cheapestResolved = withPrice.length > 0
+          ? withPrice.reduce((a, b) => ((a.price as number) <= (b.price as number) ? a : b))
+          : null;
+        productImage = cheapestResolved?.imageUrl || resolved.find((r) => r.imageUrl)?.imageUrl || null;
+
+        // Merge the real price/stock/lastChecked data back into retailerPrices
+        // so the "find the best price yourself" section can show real numbers
+        // next to each store link instead of just a bare link.
+        retailerPrices = resolved;
+      } catch (e) {
+        console.error("[/api/analyze] Resolving live retailer prices failed (non-fatal, keeping AI-estimated range):", e);
       }
 
       // ---- STEP 1c: alternatives with their own fair price ranges + links ----
@@ -833,6 +884,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         marketPriceSummary: marketPrice.summary,
         retailerPrices,
         betterAlternatives: alternativesWithPrices,
+        productImage,
       };
 
       console.log(`[/api/analyze] Compound market price: min=${marketPrice.min}, max=${marketPrice.max}, mid=${marketPrice.mid}`);
@@ -992,6 +1044,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       marketPriceSummary: normalizedMarket.summary,
       retailerPrices: marketData.retailerPrices,
       betterAlternatives: marketData.betterAlternatives,
+      productImage: marketData.productImage ?? null,
       // AI-generated decision (always fresh, never cached)
       ...decision,
       moneySaved,
