@@ -41,24 +41,24 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#0B0B0F] px-6 text-center text-zinc-100">
+        <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#FFFFFF] px-6 text-center text-zinc-900">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10 ring-1 ring-red-500/30">
             <AlertTriangle className="h-7 w-7 text-red-400" />
           </div>
-          <h1 className="font-serif text-xl font-bold text-red-400">حدث خطأ غير متوقع / Something went wrong</h1>
+          <h1 className="text-xl font-bold text-red-400">حدث خطأ غير متوقع / Something went wrong</h1>
           <p className="max-w-md text-sm text-zinc-400">
             التطبيق واجه مشكلة أثناء عرض هذه الشاشة. جرّب الرجوع للصفحة الرئيسية.
             <br />
             The app hit a problem rendering this screen. Try going back to the home screen.
           </p>
           {this.state.error && (
-            <pre className="max-w-full overflow-auto rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-left text-xs text-red-300">
+            <pre className="max-w-full overflow-auto rounded-lg border border-zinc-200 bg-white/60 p-3 text-left text-xs text-red-300">
               {this.state.error.message}
             </pre>
           )}
           <button
             onClick={this.handleReset}
-            className="flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-[#0B0B0F] hover:bg-amber-400"
+            className="flex items-center gap-2 rounded-lg bg-shary px-4 py-2 text-sm font-bold text-[#FFFFFF] hover:bg-shary"
           >
             <RotateCcw className="h-4 w-4" /> الرجوع للرئيسية / Go home
           </button>

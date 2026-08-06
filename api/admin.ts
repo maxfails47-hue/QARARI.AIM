@@ -158,7 +158,7 @@ async function handleApprove(req: VercelRequest, res: VercelResponse) {
     const planDisplayName = reqRow.plan.replace("_", " ").toUpperCase();
     await sendEmail(
       reqRow.users.email,
-      `تم تفعيل باقة ${planDisplayName} — Qarari.AI`,
+      `تم تفعيل باقة ${planDisplayName} — Shary`,
       `<p>تم تفعيل باقتك (${planDisplayName}) بنجاح!</p>
        ${endDate ? `<p>صالحة حتى ${(endDate as any).toLocaleDateString("ar-EG")}.</p>` : "<p>هذه الباقة لا تنتهي بصلاحية زمنية.</p>"}
        <p>Your ${planDisplayName} plan is now active!</p>`

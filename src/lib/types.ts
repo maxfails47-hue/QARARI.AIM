@@ -1,6 +1,5 @@
 export type Language = "ar" | "en";
-export type Verdict = "good" | "fair" | "bad";
-export type Screen = "input" | "reveal" | "report" | "history" | "profile" | "login" | "upgrade" | "compare" | "guide" | "advisor" | "watchlist" | "comparisonHistory";
+export type Screen = "input" | "history" | "profile" | "login" | "upgrade" | "guide" | "advisor" | "watchlist";
 
 export interface Currency {
   code: string;
@@ -45,13 +44,16 @@ export interface Alternative {
   searchLinks?: { retailer: string; url: string }[];
 }
 
+// Legacy shape kept only so old rows already saved in the `analyses` table
+// (from before the plain-search pivot) still type-check when HistoryScreen
+// sums up their stored moneySaved for the "total savings" stat. Nothing in
+// the app creates new records with this shape anymore — no offered price,
+// no verdict, no negotiation script. See CHANGES.md for the pivot notes.
 export interface AnalysisResult {
   id: string;
   product: string;
-  offeredPrice: number;
   currency: string;
   condition?: string;
-  verdict: Verdict;
   // Nullable: the backend now allows the AI to return null for these when it
   // genuinely has no reliable pricing data, instead of inventing a number.
   marketFairPriceMin: number | null;
@@ -61,18 +63,7 @@ export interface AnalysisResult {
   // the current market price range in natural language (new vs used, min/max).
   marketPriceSummary: BilingualText;
   moneySaved: number | null;
-  reasoningPoints: BilingualArray;
-  preRecommendation: BilingualText;
-  futureCompatibility: BilingualText;
-  regretLevel: "low" | "medium" | "high";
-  regretJustification: BilingualText;
-  pros: BilingualArray;
-  cons: BilingualArray;
-  hiddenRisks: BilingualArray;
-  finalTip: BilingualText;
   betterAlternatives: Alternative[];
-  negotiationScript: BilingualText;
-  negotiationScriptVariants?: { polite: BilingualText; firm: BilingualText };
   communityInsights?: {
     analyzedCount: number;
     recentPrices: number[];
@@ -94,32 +85,6 @@ export interface AnalysisResult {
 // this once a B.TECH affiliate/commission deal is confirmed. Kept as a
 // simple constant since the frontend can't read server env vars directly.
 export const SHOW_BTECH_COMPARISON = false;
-
-export interface CompareRow {
-  category: BilingualText;
-  valueA: BilingualText;
-  valueB: BilingualText;
-  winner: "A" | "B" | "tie";
-}
-
-export interface CompareResult {
-  productA: string;
-  productB: string;
-  rows: CompareRow[];
-  finalRecommendation: BilingualText;
-  priceA: number;
-  priceB: number;
-  currency: string;
-  resaleValueA?: number;
-  resaleValueB?: number;
-  resaleValueTimeframe?: string;
-  warrantyScoreA?: number;
-  warrantyScoreB?: number;
-  marketFairPriceMinA?: number | null;
-  marketFairPriceMaxA?: number | null;
-  marketFairPriceMinB?: number | null;
-  marketFairPriceMaxB?: number | null;
-}
 
 export interface UserProfile {
   id: string;

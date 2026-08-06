@@ -7,7 +7,12 @@ export default {
   theme: {
     extend: {
       colors: {
-        gold: "#D4AF37",
+        shary: "#00B884",
+        "shary-dark": "#059669",
+        "shary-light": "#E6FAF3",
+        // legacy aliases kept temporarily so old dark-theme classes still resolve
+        // while screens are migrated one-by-one to the light Shary theme
+        gold: "#00B884",
         bgdark: "#0B0B0F",
       },
     },

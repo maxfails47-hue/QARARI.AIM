@@ -1,48 +1,22 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useApp } from "@/lib/AppContext";
-import { getCategoryIcon, getIconByCategory, getCategoryKey, isConditionRelevant } from "@/lib/categoryIcons";
-import { getVariantChipGroups } from "@/lib/variantChips";
-import { currencies, FREE_MONTHLY_LIMIT } from "@/lib/types";
-import { getDemoReport } from "@/lib/analysisEngine";
-import { parsePrice } from "@/lib/parsePrice";
-import { supabase } from "@/lib/supabase";
+import { getCategoryIcon, getIconByCategory } from "@/lib/categoryIcons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { Sparkles, Camera, Upload, X, Crown, GitCompare, RefreshCw, Mic, Send, HelpCircle } from "lucide-react";
+import { Sparkles, Crown, Mic, Send, HelpCircle, X } from "lucide-react";
 import { getCachedFingerprint } from "@/lib/fingerprint";
 
 export function InputScreen() {
-  const { t, lang, navigate, setCurrentReport, isPremium, session, showToast, history, saveToHistory, addToGuestHistory, setHelpSheetOpen } = useApp();
+  const { t, lang, navigate, isPremium, session, showToast, setHelpSheetOpen } = useApp();
   const [product, setProduct] = useState("");
-  const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState("EGP");
 
-  const [purpose, setPurpose] = useState("personal");
-  const [duration, setDuration] = useState("oneToTwoYears");
-  const [specs, setSpecs] = useState("");
-  const [condition, setCondition] = useState("new");
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [photo, setPhoto] = useState<string | null>(null);
-  // Section 4: photo-to-autofill state — the extraction call is a
-  // pre-fill suggestion only, never an auto-submit (see runPhotoExtraction).
-  const [extracting, setExtracting] = useState(false);
-  const [extractCaption, setExtractCaption] = useState<string | null>(null);
-  const [highlightProduct, setHighlightProduct] = useState(false);
-  const [highlightPrice, setHighlightPrice] = useState(false);
-  // Section 5: inline hint shown when the typed price can't be parsed.
-  const [priceHint, setPriceHint] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
-  const [maxScans, setMaxScans] = useState<number>(FREE_MONTHLY_LIMIT);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [maxScans, setMaxScans] = useState<number>(0);
 
-  // Chat Assistant State
+  // Chat Assistant State — unrelated to the search form, left as-is.
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<{
@@ -60,10 +34,8 @@ export function InputScreen() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // ─── Voice Input for Product Name ───
-  // Uses Web Speech API to capture the product name ONLY from voice.
-  // The full transcript (e.g. "آيفون 15 برو ماكس") is placed entirely in the
-  // product name field — numbers like "15" are part of the product name here,
-  // not a price, so we no longer try to split out a price from this input.
+  // Uses Web Speech API to capture the product name ONLY from voice. The
+  // full transcript is placed entirely in the product name field.
   const toggleProductVoiceInput = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
@@ -83,22 +55,14 @@ export function InputScreen() {
 
     rec.onresult = (e: any) => {
       const transcript = e.results[0][0].transcript.trim();
-      console.log("[Voice Input] Raw transcript:", transcript);
-
-      // The entire transcript is the product name — no price extraction.
       if (transcript) {
         setProduct((prev) => (prev ? prev + " " : "") + transcript);
       }
-
-      console.log("[Voice Input] Product name set to:", transcript);
       showToast(lang === "ar" ? "تم إدخال اسم المنتج" : "Product name added");
     };
 
     rec.onend = () => setProductVoiceListening(false);
-    rec.onerror = (e: any) => {
-      console.warn("[Voice Input] Error:", e.error);
-      setProductVoiceListening(false);
-    };
+    rec.onerror = () => setProductVoiceListening(false);
 
     rec.start();
     productVoiceRef.current = rec;
@@ -106,7 +70,6 @@ export function InputScreen() {
   };
 
   // Device fingerprint — fetched once on mount and cached for the session.
-  // Used for server-side guest quota enforcement (not stored in localStorage).
   const [deviceFingerprint, setDeviceFingerprint] = useState<string | null>(null);
   useEffect(() => {
     getCachedFingerprint().then(setDeviceFingerprint);
@@ -181,7 +144,6 @@ export function InputScreen() {
           : undefined;
         setChatMessages((prev) => [...prev, { role: "assistant", content: data.answer, productSuggestions: suggestions }]);
       } else {
-        // Fallback for raw text if any (though backend should return JSON now)
         const text = typeof data === 'string' ? data : JSON.stringify(data);
         setChatMessages((prev) => [...prev, { role: "assistant", content: text }]);
       }
@@ -196,30 +158,20 @@ export function InputScreen() {
     }
   };
 
-  // Section 9: ready-made budget-suggestion prompts shown when the advisor
-  // chat is empty, so users discover the "recommend within my budget"
-  // capability instead of only ever asking free-form questions.
   const budgetChips = [t("budgetSuggestChip1"), t("budgetSuggestChip2"), t("budgetSuggestChip3")];
 
   const localIcon = useMemo(() => getCategoryIcon(product), [product]);
 
-  // "Smart" product icon: the local keyword match above is instant and
-  // covers the common cases, but it's a fixed keyword list and misses
-  // anything not on it (falling back to the generic box icon). To make the
-  // icon feel genuinely smart, we ask Groq (a fast, tiny classification
-  // call — see api/user.ts?action=classify-icon) to upgrade the icon in the
-  // background once the user pauses typing. This NEVER blocks or delays the
-  // UI: the local icon renders immediately and stays until (and unless) the
-  // AI call resolves; a slow network or a failed/timed-out call just means
-  // the local icon is kept, never a stuck spinner or empty icon.
+  // "Smart" product icon: local keyword match is instant; upgraded in the
+  // background via a tiny classification call once the user pauses typing.
   const [aiCategory, setAiCategory] = useState<string | null>(null);
   useEffect(() => {
-    setAiCategory(null); // reset the AI upgrade whenever the product name changes
+    setAiCategory(null);
     const trimmed = product.trim();
     if (trimmed.length < 2) return;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000); // hard cap so a slow call never lingers
+    const timeout = setTimeout(() => controller.abort(), 4000);
     const debounce = setTimeout(async () => {
       try {
         const res = await fetch("/api/user?action=classify-icon", {
@@ -232,12 +184,11 @@ export function InputScreen() {
         const data = await res.json();
         if (data?.category) setAiCategory(data.category);
       } catch {
-        // Silent — the local keyword icon is already showing, so a failed
-        // or aborted classification call is never user-visible.
+        // Silent — the local keyword icon is already showing.
       } finally {
         clearTimeout(timeout);
       }
-    }, 500); // wait for a pause in typing before spending an AI call
+    }, 500);
 
     return () => {
       clearTimeout(debounce);
@@ -246,62 +197,16 @@ export function InputScreen() {
     };
   }, [product]);
 
-  // Variant chips (storage/RAM/size/etc.): local keyword match first (covers
-  // Arabic + English brand names), falling back to the same AI category used
-  // for the icon above when the product name is phrased in a way the static
-  // keyword list doesn't recognize — so chips still show up instead of
-  // silently disappearing for names typed in Arabic.
-  const variantChipGroups = useMemo(() => getVariantChipGroups(product, aiCategory), [product, aiCategory]);
-
-  // Prefer the AI category only when it actually identified something
-  // specific — if Groq comes back with "other" but the local keyword match
-  // already found a concrete icon, keep the more specific local one instead
-  // of downgrading to the generic box.
   const Icon = aiCategory && aiCategory !== "other" ? getIconByCategory(aiCategory) : localIcon;
 
-  // Whether "condition" (new/like-new/used) is worth asking about at all for
-  // this product — prefer the AI category once it resolves, fall back to
-  // the instant local keyword match before that (so it doesn't flicker in
-  // late). See categoryIcons.ts for the category list this covers.
-  const localCategoryKey = useMemo(() => getCategoryKey(product), [product]);
-  const effectiveCategoryKey = aiCategory && aiCategory !== "other" ? aiCategory : localCategoryKey;
-  const showConditionField = isConditionRelevant(effectiveCategoryKey);
-
-  // Tapping a chip appends it to specs (e.g. "128GB") instead of the user
-  // having to type it. Avoids adding the same value twice.
-  const toggleSpecChip = (value: string) => {
-    const parts = specs.split(",").map((p) => p.trim()).filter(Boolean);
-    if (parts.includes(value)) {
-      setSpecs(parts.filter((p) => p !== value).join(", "));
-    } else {
-      setSpecs([...parts, value].join(", "));
-    }
-  };
-
-  // Both Free and Premium now carry a monthly cap (Premium's is just much higher),
-  // so quota can be exceeded on either tier.
   const quotaExceeded = remaining !== null && remaining <= 0;
 
-  // Fetch the real remaining-scans count from the server on load and whenever
-  // premium status changes — never a locally-guessed number (fixes the
-  // negative-counter bug: this always reflects the server's floor-at-0 value).
-  //
-  // IMPORTANT: for guests, deviceFingerprint is fetched asynchronously in a
-  // separate effect above and is still `null` on the very first render. If
-  // this effect fires before that resolves, it sends a request with no
-  // fingerprint, which makes the server fall back to the (empty) IP-based
-  // guest_usage lookup instead of the real fingerprint-based usage row —
-  // so it always reports the full quota, even after scans were used. We
-  // guard on that here and add deviceFingerprint as a dependency so the
-  // fetch re-runs (with the fingerprint included) once it's ready.
   useEffect(() => {
-    if (!session?.user && deviceFingerprint === null) return; // wait for guest fingerprint
+    if (!session?.user && deviceFingerprint === null) return;
     async function fetchRemaining() {
       try {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-        // Include fingerprint in the request body so the server can
-        // resolve the correct quota for guest users
         const body: Record<string, any> = {};
         if (deviceFingerprint) {
           body.deviceFingerprint = deviceFingerprint;
@@ -321,9 +226,6 @@ export function InputScreen() {
     fetchRemaining();
   }, [session, isPremium, deviceFingerprint]);
 
-  // Item 3: fetch the REAL advisor-chat quota from the backend instead of
-  // assuming a fixed 150 for premium — that number was never the plan's
-  // actual chat_messages_limit, just a guess baked into the initial state.
   useEffect(() => {
     async function fetchChatRemaining() {
       try {
@@ -333,183 +235,66 @@ export function InputScreen() {
         const data = await res.json();
         if (typeof data.remaining === "number") setChatRemaining(data.remaining);
       } catch {
-        // leave as null — falls back to the disabled-until-loaded state below
+        // leave as null
       }
     }
     fetchChatRemaining();
   }, [session, isPremium]);
 
-  // Section 4: fire the lightweight, extraction-only call and pre-fill the
-  // form. This NEVER submits an analysis by itself — the person always
-  // still sees (and can edit) whatever gets filled in before tapping
-  // "حلّل القرار", which still runs its own normal validation.
-  const runPhotoExtraction = async (dataUrl: string) => {
-    setExtracting(true);
-    setExtractCaption(t("extractReadingPhoto"));
-    try {
-      const [meta, data] = dataUrl.split(",");
-      const mimeType = meta.match(/data:(.*);base64/)?.[1] || "image/jpeg";
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      const res = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: { data, mimeType } }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!res.ok) throw new Error("extract_failed");
-      const result = await res.json();
-
-      if (result.productName) {
-        setProduct(result.productName);
-        setHighlightProduct(true);
-        setTimeout(() => setHighlightProduct(false), 2500);
-      }
-      if (typeof result.price === "number" && result.price > 0) {
-        setPrice(String(result.price));
-        setHighlightPrice(true);
-        setTimeout(() => setHighlightPrice(false), 2500);
-        setExtractCaption(t("extractReadFromPhoto"));
-      } else {
-        // Never fabricate a price — leave it empty and say so plainly.
-        setExtractCaption(t("extractNoPriceFound"));
-      }
-      if (result.currency && currencies.some((c) => c.code === result.currency)) {
-        setCurrency(result.currency);
-      }
-    } catch {
-      // Extraction failing is never blocking — just stop the animation and
-      // let the person fill the form manually.
-      setExtractCaption(t("extractFailed"));
-    } finally {
-      setExtracting(false);
-      setTimeout(() => setExtractCaption(null), 4000);
-    }
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        setPhoto(dataUrl);
-        runPhotoExtraction(dataUrl);
-      };
-      reader.readAsDataURL(file);
-    }
-    e.target.value = "";
-  };
+  // Calls the new /api/search endpoint (Shary Phase 2): product name only,
+  // real per-store prices back. Not wired into the old scans quota system
+  // yet (see api/search.ts header) and not routed through the old
+  // reveal/report screens — those were built around the old verdict shape.
+  // Results render inline below until the real "Full Analysis" screen
+  // (Phase 5) exists.
+  const [searchResult, setSearchResult] = useState<any>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    // The server is the single source of truth for quota — we never block the
-    // click on the locally cached `remaining` count (it can be briefly stale
-    // right after load, e.g. before the guest fingerprint resolves). We always
-    // attempt the real analysis; if /api/analyze itself returns 403 below,
-    // that's the authoritative "quota exceeded" signal and we route to
-    // upgrade then.
-    // Section 5: normalize the raw price text (Arabic-Indic digits,
-    // thousands separators, "50 الف"/"1.5 مليون" shorthand, etc.) instead of
-    // a plain parseFloat — see src/lib/parsePrice.ts.
-    const parsedPrice = parsePrice(price);
-    if (!product.trim() || parsedPrice === null || parsedPrice <= 0) {
-      setPriceHint(parsedPrice === null || parsedPrice <= 0);
-      showToast(lang === "ar" ? "اكتب اسم المنتج والسعر" : "Enter product name and price");
+    if (!product.trim()) {
+      showToast(lang === "ar" ? "اكتب اسم المنتج" : "Enter a product name");
       return;
     }
-    setPriceHint(false);
     setLoading(true);
+    setSearchError(null);
+    setSearchResult(null);
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-
-      let imageBase64: { data: string; mimeType: string } | undefined;
-      if (photo) {
-        const [meta, data] = photo.split(",");
-        const mimeType = meta.match(/data:(.*);base64/)?.[1] || "image/jpeg";
-        imageBase64 = { data, mimeType };
-      }
-
-      const body: Record<string, any> = {
-        product: product.trim(),
-        offeredPrice: parsedPrice,
-        currency,
-        notes: "",
-        purpose,
-        duration,
-        specs: specs.trim(),
-        condition,
-        language: lang,
-        imageBase64,
-      };
-      // Always send fingerprint for server-side guest quota enforcement
-      if (deviceFingerprint) {
-        body.deviceFingerprint = deviceFingerprint;
-      }
-
-      const res = await fetch("/api/analyze", {
+      const res = await fetch("/api/search", {
         method: "POST",
-        headers,
-        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product: product.trim(), currency: "EGP", language: lang }),
       });
 
-      if (res.status === 403) {
-        // Section 14: hard server-side quota block — never runs the analysis
-        setRemaining(0);
-        navigate("upgrade");
-        return;
-      }
-
       if (!res.ok) {
-        showToast(t("analysisError") || (lang === "ar" ? "حدث خطأ، حاول مرة أخرى" : "Something went wrong, please retry"));
+        const err = await res.json().catch(() => null);
+        setSearchError(err?.error || (lang === "ar" ? "حدث خطأ، حاول مرة أخرى" : "Something went wrong, please retry"));
         return;
       }
 
       const result = await res.json();
-      console.log("FULL AI RESPONSE:", result);
-      setCurrentReport(result);
-      // Guests aren't signed in yet, so this can't be saved to Supabase —
-      // keep it in local device history so it's not just gone if they
-      // navigate away without creating an account.
-      if (!session?.user) addToGuestHistory(result);
+      setSearchResult(result);
       setRemaining((r) => (r !== null ? Math.max(0, r - 1) : r));
-      // The animated, shareable "reveal" moment now sits between submit and
-      // the full report — see RevealScreen.tsx.
-      navigate("reveal");
     } catch {
-      showToast(lang === "ar" ? "تعذر الاتصال بالخادم" : "Couldn't reach the server");
+      setSearchError(lang === "ar" ? "تعذر الاتصال بالخادم" : "Couldn't reach the server");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDemo = () => {
-    setCurrentReport(getDemoReport());
-    navigate("report");
-  };
 
-  // Analysis takes ~30-40 seconds (live price research + AI reasoning), so a
-  // static "Analyzing..." label makes the screen feel frozen. Rotate through
-  // a few reassuring, specific status phrases while `loading` is true so the
-  // person can see real progress is happening in the background.
   const loadingMessages =
     lang === "ar"
       ? [
-          "جاري فحص الأسعار بالذكاء الاصطناعي...",
-          "نجمع بيانات السوق حالياً...",
-          "نقارن بأسعار المتاجر الموثوقة...",
-          "نحسب أفضل سعر عادل للمنتج...",
-          "قريبًا يكتمل التقرير...",
+          "بندور في المتاجر...",
+          "بنقارن الأسعار الحقيقية...",
+          "بنتأكد من التوفر...",
+          "قريبًا نلاقي أرخص سعر...",
         ]
       : [
-          "Analyzing prices with AI...",
-          "Gathering live market data...",
-          "Comparing trusted retailer prices...",
-          "Calculating the fairest price...",
-          "Almost done with your report...",
+          "Searching stores...",
+          "Comparing real prices...",
+          "Checking stock...",
+          "Almost there...",
         ];
 
   useEffect(() => {
@@ -528,92 +313,42 @@ export function InputScreen() {
     <div className="mx-auto max-w-2xl px-4 py-6">
       {/* Hero */}
       <div className="mb-6 text-center">
-        <div className="mb-3 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-xl shadow-amber-500/20">
-          <Sparkles className="h-8 w-8 text-[#0B0B0F]" />
+        <div className="mb-3 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-shary shadow-xl shadow-shary/30">
+          <span className="text-2xl font-extrabold text-white">S</span>
         </div>
-        <h1 className="font-serif text-3xl font-bold text-amber-400">{t("appName")}</h1>
+        <h1 className="text-3xl font-bold text-shary-dark">{t("appName")}</h1>
         <p className="mt-1 text-sm text-zinc-400">{t("tagline")}</p>
       </div>
 
-      {/* Form Card */}
-      <div className="rounded-2xl border border-amber-500/15 bg-gradient-to-b from-zinc-900/80 to-[#0B0B0F] p-6 shadow-2xl">
+      {/* Search Card — product name + voice only. Everything else
+          (offered price, currency, condition, purpose/duration, photo
+          upload, other specs) was removed on purpose: Shary no longer
+          judges a price the user types in, it searches real stores. */}
+      <div className="rounded-2xl border border-shary/15 bg-white p-6 shadow-2xl">
         <div className="space-y-5">
-          {/* Photo Upload — the primary, fastest path. Snap a photo in the
-              shop (or of a screenshot from Amazon/Noon/etc.) and the name,
-              price, and currency below fill themselves in. */}
-          <div className="space-y-2 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
+          <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber-400" />
-              <Label className="text-sm font-bold text-amber-400">{t("uploadPhoto")}</Label>
+              <Label className="text-sm font-medium text-zinc-700">{t("productName")}</Label>
               <button
                 type="button"
                 onClick={() => setHelpSheetOpen(true)}
-                aria-label={lang === "ar" ? "إزاي قراري بيشتغل؟" : "How does Qarari work?"}
-                className="help-pulse-attn flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[11px] font-bold text-amber-400 hover:bg-amber-500/20"
+                aria-label={lang === "ar" ? "إزاي شاري بيشتغل؟" : "How does Shary work?"}
+                className="flex items-center gap-1 rounded-full border border-shary/40 bg-shary-light px-2 py-0.5 text-[11px] font-bold text-shary-dark hover:bg-shary/10"
               >
                 <HelpCircle className="h-3.5 w-3.5" />
                 {t("helpButtonLabel")}
               </button>
             </div>
-            <div className="flex gap-2">
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
-              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileSelect} className="hidden" />
-              <Button
-                onClick={() => fileInputRef.current?.click()}
-                variant="outline"
-                className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 hover:text-amber-400"
-              >
-                <Upload className="h-4 w-4" /> {t("uploadPhoto")}
-              </Button>
-              <Button
-                onClick={() => cameraInputRef.current?.click()}
-                variant="outline"
-                className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 hover:text-amber-400"
-              >
-                <Camera className="h-4 w-4" /> {t("takePhoto")}
-              </Button>
-            </div>
-            {photo && (
-              <div className="relative inline-block">
-                <div className="relative h-20 w-20 overflow-hidden rounded-lg border border-amber-500/20">
-                  <img src={photo} alt="product" className="h-full w-full object-cover" />
-                  {extracting && (
-                    <div className="pointer-events-none absolute inset-0 overflow-hidden bg-black/10">
-                      <div className="photo-scan-line absolute inset-x-0 h-6 bg-gradient-to-b from-transparent via-amber-400/60 to-transparent" />
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={() => {
-                    setPhoto(null);
-                    setExtracting(false);
-                    setExtractCaption(null);
-                  }}
-                  className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-lg"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )}
-            {extractCaption && (
-              <p className="text-xs font-medium text-amber-400">{extractCaption}</p>
-            )}
-            <p className="text-xs text-zinc-500">{t("photoHelper")}</p>
-          </div>
-
-          {/* Product Name with Live Icon */}
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("productName")}</Label>
             <div className="flex items-center gap-2">
-              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-zinc-800 via-zinc-900 to-black shadow-md ring-1 ring-amber-500/20">
-                <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/10 via-transparent to-transparent" />
-                <Icon className="relative h-6 w-6 text-amber-400/90" strokeWidth={1.5} />
+              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-shary-light ring-1 ring-shary/20">
+                <Icon className="relative h-6 w-6 text-shary-dark" strokeWidth={1.5} />
               </div>
               <Input
                 value={product}
                 onChange={(e) => setProduct(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !loading && handleSubmit()}
                 placeholder={t("productNamePlaceholder")}
-                className={`flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${highlightProduct ? "field-autofill-glow" : ""}`}
+                className="flex-1 border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400 focus:border-shary"
               />
               <button
                 type="button"
@@ -621,199 +356,27 @@ export function InputScreen() {
                 disabled={loading}
                 className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border transition-all ${
                   productVoiceListening
-                    ? "border-red-500 bg-red-500/20 text-red-400 animate-pulse"
-                    : "border-zinc-700 bg-zinc-800/50 text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/10"
+                    ? "border-red-500 bg-red-50 text-red-500 animate-pulse"
+                    : "border-zinc-300 bg-white text-shary-dark hover:border-shary hover:bg-shary-light"
                 } disabled:opacity-50`}
                 title={lang === "ar" ? "ادخل اسم المنتج بالصوت" : "Voice input for product name"}
               >
                 <Mic className="h-5 w-5" />
               </button>
             </div>
-            {/* Voice input hint */}
             {productVoiceListening && (
-              <p className="text-[11px] text-red-400 animate-pulse">
-                {lang === "ar" ? "🎤 بتكلم دلوقتي... قول اسم المنتج والسعر (مثال: \"آيفون 15 سعره 35000\")" : "🎤 Listening... Say the product name and price (e.g., \"iPhone 15 price 35000\")"}
+              <p className="text-[11px] text-red-500 animate-pulse">
+                {lang === "ar" ? "🎤 بتكلم دلوقتي... قول اسم المنتج" : "🎤 Listening... Say the product name"}
               </p>
-            )}
-            {highlightProduct && (
-              <p className="text-[11px] text-amber-400">{t("extractReadFromPhoto")}</p>
-            )}
-          </div>
-
-          {/* Price + Currency */}
-          <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("offeredPrice")}</Label>
-            <Input
-              type="text"
-              inputMode="decimal"
-              value={price}
-              onChange={(e) => {
-                setPrice(e.target.value);
-                if (priceHint) setPriceHint(false);
-              }}
-              onBlur={() => {
-                if (price.trim() && parsePrice(price) === null) setPriceHint(true);
-              }}
-              placeholder={t("pricePlaceholderHint")}
-              className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${highlightPrice ? "field-autofill-glow" : ""}`}
-            />
-            {priceHint && (
-              <p className="text-[11px] text-amber-400">{t("priceParseHint")}</p>
-            )}
-            {highlightPrice && !priceHint && (
-              <p className="text-[11px] text-amber-400">{t("extractReadFromPhoto")}</p>
-            )}
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium text-zinc-300">{t("currency")}</Label>
-              <Select value={currency} onValueChange={setCurrency}>
-                <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
-                  {currencies.map((c) => (
-                    <SelectItem key={c.code} value={c.code} className="focus:bg-amber-500/20 focus:text-amber-400">
-                      {lang === "ar" ? `${c.arName} (${c.arShort})` : `${c.enName} (${c.enShort})`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Product Condition — only shown for products where "used vs new"
-              genuinely changes the analysis (electronics-type items). For
-              something like shampoo it doesn't make sense, so we skip it
-              entirely instead of asking a question with no good answer.
-              Kept visible (not folded into the optional section) when it
-              IS relevant, since it changes HOW the AI searches — for a used
-              item it looks at resale listings (e.g. Facebook Marketplace
-              groups) instead of retail prices. */}
-          {showConditionField && (
-          <div className="space-y-1.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.03] p-3">
-            <div className="flex items-center gap-1.5">
-              <Label className="text-sm font-medium text-zinc-200">{t("productCondition")}</Label>
-              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-400">
-                {lang === "ar" ? "بيغيّر طريقة البحث" : "changes the search"}
-              </span>
-            </div>
-            <Select value={condition} onValueChange={setCondition}>
-              <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
-                <SelectItem value="new" className="focus:bg-amber-500/20 focus:text-amber-400">{t("conditionNew")}</SelectItem>
-                <SelectItem value="likeNew" className="focus:bg-amber-500/20 focus:text-amber-400">{t("conditionLikeNew")}</SelectItem>
-                <SelectItem value="used" className="focus:bg-amber-500/20 focus:text-amber-400">{t("conditionUsed")}</SelectItem>
-              </SelectContent>
-            </Select>
-            {condition === "used" && (
-              <p className="text-[11px] text-amber-400">
-                {lang === "ar"
-                  ? "هنقارن السعر بأسعار الأجهزة المستعملة الفعلية (زي جروبات السوق المستعمل) مش بسعر الجديد."
-                  : "We'll compare against real resale/used-market prices, not new retail prices."}
-              </p>
-            )}
-          </div>
-          )}
-
-          {/* Additional Details — collapsed by default. Purpose and expected
-              duration are genuine refinements but don't change the search
-              itself, so they don't need to block a quick "is this a fair
-              price?" check on something like shampoo. */}
-          <div className="rounded-xl border border-zinc-800">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              className="flex w-full items-center justify-between px-3 py-2.5 text-sm font-medium text-zinc-300"
-            >
-              <span>{t("additionalDetailsOptional")}</span>
-              <span className={`text-zinc-500 transition-transform ${showAdvanced ? "rotate-180" : ""}`}>⌄</span>
-            </button>
-            {showAdvanced && (
-              <div className="space-y-5 border-t border-zinc-800 p-3 pt-4">
-                {/* Usage Profile */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-zinc-300">{t("purposeOfUse")}</Label>
-                    <Select value={purpose} onValueChange={setPurpose}>
-                      <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
-                        <SelectItem value="personal" className="focus:bg-amber-500/20 focus:text-amber-400">{t("personal")}</SelectItem>
-                        <SelectItem value="gift" className="focus:bg-amber-500/20 focus:text-amber-400">{t("gift")}</SelectItem>
-                        <SelectItem value="work" className="focus:bg-amber-500/20 focus:text-amber-400">{t("work")}</SelectItem>
-                        <SelectItem value="gaming" className="focus:bg-amber-500/20 focus:text-amber-400">{t("gaming")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-zinc-300">{t("expectedDuration")}</Label>
-                    <Select value={duration} onValueChange={setDuration}>
-                      <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
-                        <SelectItem value="lessThanYear" className="focus:bg-amber-500/20 focus:text-amber-400">{t("lessThanYear")}</SelectItem>
-                        <SelectItem value="oneToTwoYears" className="focus:bg-amber-500/20 focus:text-amber-400">{t("oneToTwoYears")}</SelectItem>
-                        <SelectItem value="threePlusYears" className="focus:bg-amber-500/20 focus:text-amber-400">{t("threePlusYears")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Other Specs */}
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-zinc-300">{t("otherSpecs")}</Label>
-                  <Input
-                    value={product === "" ? "" : specs}
-                    onChange={(e) => setSpecs(e.target.value)}
-                    placeholder={lang === "ar" ? "اللون، السعة، المميزات..." : "Color, storage, features..."}
-                    className="border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
-                  />
-                  {/* Quick-pick chips: tap the exact variant instead of typing it.
-                      Narrows the market price range and keeps cache results precise. */}
-                  {variantChipGroups.length > 0 && (
-                    <div className="space-y-2 pt-1">
-                      {variantChipGroups.map((group) => (
-                        <div key={group.label.en}>
-                          <p className="mb-1 text-[11px] text-zinc-500">{lang === "ar" ? group.label.ar : group.label.en}</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {group.options.map((opt) => {
-                              const selected = specs.split(",").map((p) => p.trim()).includes(opt);
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  onClick={() => toggleSpecChip(opt)}
-                                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                                    selected
-                                      ? "border-amber-500 bg-amber-500/20 text-amber-400"
-                                      : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-amber-500/40 hover:text-amber-400"
-                                  }`}
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
             )}
           </div>
 
           {/* Scan Counter */}
           <div className="text-center text-sm">
             {remaining === null ? (
-              <span className="text-zinc-600">…</span>
+              <span className="text-zinc-400">…</span>
             ) : (
-              <span className={isPremium ? "font-bold text-amber-400" : "text-zinc-400"}>
+              <span className={isPremium ? "font-bold text-shary-dark" : "text-zinc-500"}>
                 {t("scansLeft", { remaining, max: maxScans })}
               </span>
             )}
@@ -823,57 +386,107 @@ export function InputScreen() {
           <Button
             onClick={quotaExceeded ? () => navigate("upgrade") : handleSubmit}
             disabled={loading}
-            className="w-full bg-gradient-to-r from-amber-400 to-amber-600 text-[#0B0B0F] font-bold hover:from-amber-300 hover:to-amber-500 disabled:opacity-90"
+            className="w-full bg-shary text-white font-bold hover:bg-shary-dark disabled:opacity-90"
           >
             {loading ? (
               <span className="flex items-center gap-2">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#0B0B0F] border-t-transparent" />
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                 <span key={loadingMessageIndex}>{loadingMessages[loadingMessageIndex]}</span>
               </span>
             ) : quotaExceeded ? (
               <><Crown className="h-4 w-4" /> {t("upgrade")}</>
             ) : (
-              <><Sparkles className="h-4 w-4" /> {t("analyzeDecision")}</>
+              <><Sparkles className="h-4 w-4" /> {lang === "ar" ? "دوّر على أرخص سعر" : "Find the best price"}</>
             )}
           </Button>
 
-          {/* Analysis progress skeleton — gives a visible sense of a
-              multi-step process running (price research → AI reasoning →
-              report assembly) instead of a single frozen spinner. */}
           {loading && (
-            <div className="space-y-2 rounded-xl border border-amber-500/10 bg-zinc-900/40 p-3">
+            <div className="space-y-2 rounded-xl border border-shary/10 bg-shary-light/40 p-3">
               {[0, 1, 2].map((row) => (
                 <div
                   key={row}
-                  className="h-2.5 animate-pulse rounded-full bg-gradient-to-r from-zinc-700/70 via-zinc-600/50 to-zinc-700/70"
+                  className="h-2.5 animate-pulse rounded-full bg-gradient-to-r from-zinc-200 via-zinc-100 to-zinc-200"
                   style={{ width: `${85 - row * 15}%`, animationDelay: `${row * 150}ms` }}
                 />
               ))}
             </div>
           )}
 
-          {/* Compare Button */}
-          <Button
-            onClick={() => navigate("compare")}
-            variant="outline"
-            className="w-full border-amber-500/30 bg-amber-500/5 text-amber-400 hover:bg-amber-500/10"
-          >
-            <GitCompare className="h-4 w-4" /> {t("compareProducts")}
-            {!isPremium && <Crown className="ml-1 h-3 w-3" />}
-          </Button>
+          {/* Search error */}
+          {searchError && !loading && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+              {searchError}
+            </div>
+          )}
 
-          {/* Smart Assistant Trigger */}
+          {/* Search results — inline stopgap until the real "Full Analysis"
+              screen (Phase 5) exists. Every price/store here came back from
+              /api/search a moment ago; see each card's tiny "•" source tag. */}
+          {searchResult && !loading && (
+            <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-zinc-800">{searchResult.product}</p>
+                <span className="text-[10px] text-zinc-400">
+                  {searchResult.storesResolved}/{searchResult.storesChecked} {lang === "ar" ? "متاجر" : "stores"}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {(searchResult.stores || []).map((s: any, i: number) => (
+                  <a
+                    key={i}
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`flex items-center justify-between rounded-xl border p-3 text-sm transition-colors ${
+                      s.isCheapest ? "border-shary bg-shary-light" : "border-zinc-200 bg-white hover:border-shary/40"
+                    }`}
+                  >
+                    <div>
+                      <p className="font-semibold text-zinc-800">
+                        {s.retailer}
+                        {s.isCheapest && (
+                          <span className="ml-2 rounded-full bg-shary px-2 py-0.5 text-[10px] font-bold text-white">
+                            {lang === "ar" ? "الأرخص" : "Cheapest"}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-zinc-400">
+                        {s.inStock === true
+                          ? lang === "ar" ? "متوفر" : "In stock"
+                          : s.inStock === false
+                          ? lang === "ar" ? "غير متوفر" : "Out of stock"
+                          : lang === "ar" ? "الحالة غير معروفة" : "Stock unknown"}
+                      </p>
+                    </div>
+                    <div className="text-end">
+                      {s.price !== null ? (
+                        <p className="font-bold text-zinc-900">
+                          {s.price.toLocaleString()} {s.currency}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-zinc-400">
+                          {lang === "ar" ? "السعر غير متاح" : "Price unavailable"}
+                        </p>
+                      )}
+                    </div>
+                  </a>
+                ))}
+              </div>
+              {searchResult.note && <p className="text-[11px] text-zinc-400">{searchResult.note}</p>}
+            </div>
+          )}
+
+          {/* Smart Assistant Trigger — kept, separate feature from the search form */}
           <div className="mt-8 flex justify-center">
             <button
               onClick={() => setShowChat(true)}
-              className="group relative flex items-center gap-3 overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 px-6 py-4 ring-1 ring-amber-500/20 transition-all hover:ring-amber-500/50 shadow-xl"
+              className="group relative flex items-center gap-3 overflow-hidden rounded-2xl bg-white px-6 py-4 ring-1 ring-shary/20 transition-all hover:ring-shary/50 shadow-xl"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-500/5 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 text-[#0B0B0F] shadow-lg shadow-amber-500/30">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-shary text-white shadow-lg shadow-shary/30">
                 <Sparkles className="h-5 w-5" />
               </div>
               <div className="flex flex-col items-start">
-                <span className="text-sm font-bold text-amber-400">
+                <span className="text-sm font-bold text-shary-dark">
                   {lang === "ar" ? "اسأل لو لسه محتار" : "Ask if you're still unsure"}
                 </span>
                 <span className="text-[10px] text-zinc-500 text-right">
@@ -883,17 +496,16 @@ export function InputScreen() {
             </button>
           </div>
 
-          {/* Chat Panel — centered modal overlay so it always sits mid-screen
-              and can never get clipped at a screen edge. */}
+          {/* Chat Panel */}
           {showChat && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
               onClick={(e) => { if (e.target === e.currentTarget) setShowChat(false); }}
             >
-              <div className="flex h-[75vh] max-h-[560px] w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-amber-500/30 bg-[#0B0B0F] shadow-2xl shadow-amber-500/10">
-                <div className="flex items-center justify-between border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-900/50 px-4 py-3.5">
-                  <span className="flex items-center gap-2 text-sm font-bold text-amber-400">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-300 to-amber-600 text-[#0B0B0F]">
+              <div className="flex h-[75vh] max-h-[560px] w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-shary/20 bg-white shadow-2xl">
+                <div className="flex items-center justify-between border-b border-zinc-100 bg-shary-light px-4 py-3.5">
+                  <span className="flex items-center gap-2 text-sm font-bold text-shary-dark">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-shary text-white">
                       <Sparkles className="h-4 w-4" />
                     </span>
                     {t("askAssistant")}
@@ -902,7 +514,7 @@ export function InputScreen() {
                     <span className="text-[10px] text-zinc-500">
                       {t("chatQuestionsLeft").replace("{n}", chatRemaining === null ? "…" : String(chatRemaining))}
                     </span>
-                    <button onClick={() => setShowChat(false)} className="text-zinc-500 hover:text-zinc-300">
+                    <button onClick={() => setShowChat(false)} className="text-zinc-400 hover:text-zinc-600">
                       <X className="h-4 w-4" />
                     </button>
                   </div>
@@ -910,27 +522,26 @@ export function InputScreen() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {chatMessages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-center gap-4">
-                      <div className="opacity-60">
-                        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300/20 to-amber-600/20 ring-1 ring-amber-500/20 mx-auto">
-                          <Sparkles className="h-7 w-7 text-amber-400" />
+                      <div className="opacity-70">
+                        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-shary-light ring-1 ring-shary/20 mx-auto">
+                          <Sparkles className="h-7 w-7 text-shary-dark" />
                         </div>
                         <p className="text-xs text-zinc-500">{t("askAssistantHint")}</p>
                       </div>
 
-                      {/* Budget-suggestion discoverability card */}
-                      <div className="w-full rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3 text-start">
+                      <div className="w-full rounded-2xl border border-shary/20 bg-shary-light p-3 text-start">
                         <div className="mb-2 flex items-center gap-2">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400">💰</span>
-                          <span className="text-[11px] font-bold text-amber-400">{t("budgetSuggestBadge")}</span>
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-shary-dark">💰</span>
+                          <span className="text-[11px] font-bold text-shary-dark">{t("budgetSuggestBadge")}</span>
                         </div>
-                        <p className="mb-3 text-xs leading-snug text-zinc-300">{t("budgetSuggestTitle")}</p>
+                        <p className="mb-3 text-xs leading-snug text-zinc-600">{t("budgetSuggestTitle")}</p>
                         <div className="flex flex-wrap gap-2">
                           {budgetChips.map((chip, i) => (
                             <button
                               key={i}
                               onClick={() => sendChat(chip)}
                               disabled={chatLoading || chatLimitHit}
-                              className="rounded-full border border-orange-400/30 bg-transparent px-3 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-amber-400 hover:bg-amber-500/10 hover:text-amber-300 disabled:opacity-50"
+                              className="rounded-full border border-shary/30 bg-white px-3 py-1.5 text-[11px] text-zinc-700 transition-colors hover:border-shary hover:bg-shary-light hover:text-shary-dark disabled:opacity-50"
                             >
                               {chip}
                             </button>
@@ -942,28 +553,25 @@ export function InputScreen() {
                     chatMessages.map((msg, i) => (
                       <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
                         <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                          msg.role === "user" ? "bg-amber-500 text-black font-medium" : "bg-zinc-800 text-zinc-200 border border-zinc-700"
+                          msg.role === "user" ? "bg-shary text-white font-medium" : "bg-zinc-100 text-zinc-800 border border-zinc-200"
                         }`}>
                           {msg.content}
                         </div>
 
-                        {/* Section 9: budget product suggestions, rendered as
-                            separate cards below the assistant's text reply —
-                            never inline inside the chat bubble. */}
                         {msg.role === "assistant" && msg.productSuggestions && msg.productSuggestions.length > 0 && (
                           <div className="mt-2 flex w-full max-w-[85%] flex-col gap-2">
                             {msg.productSuggestions.map((s, si) => (
-                              <div key={si} className="rounded-xl border border-amber-500/25 bg-zinc-900/60 p-2.5">
+                              <div key={si} className="rounded-xl border border-shary/20 bg-white p-2.5">
                                 <div className="mb-1 flex items-center justify-between gap-2">
-                                  <span className="text-sm font-semibold text-zinc-100">{s.name}</span>
-                                  <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-400">
+                                  <span className="text-sm font-semibold text-zinc-800">{s.name}</span>
+                                  <span className="shrink-0 rounded-full bg-shary-light px-2 py-0.5 text-[11px] font-bold text-shary-dark">
                                     {s.approxPrice}
                                   </span>
                                 </div>
-                                <p className="text-[11px] leading-snug text-zinc-400">{s.reason}</p>
+                                <p className="text-[11px] leading-snug text-zinc-500">{s.reason}</p>
                               </div>
                             ))}
-                            <p className="text-[10px] text-zinc-500">{t("productSuggestionsDisclaimer")}</p>
+                            <p className="text-[10px] text-zinc-400">{t("productSuggestionsDisclaimer")}</p>
                           </div>
                         )}
                       </div>
@@ -971,12 +579,12 @@ export function InputScreen() {
                   )}
                   {chatLoading && (
                     <div className="flex justify-start">
-                      <div className="rounded-xl bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-zinc-400">{t("chatThinking")}</div>
+                      <div className="rounded-xl bg-zinc-100 border border-zinc-200 px-3 py-2 text-sm text-zinc-500">{t("chatThinking")}</div>
                     </div>
                   )}
                   <div ref={chatEndRef} />
                 </div>
-                <div className="border-t border-zinc-800 bg-zinc-900/50 p-3">
+                <div className="border-t border-zinc-100 bg-white p-3">
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
@@ -985,13 +593,13 @@ export function InputScreen() {
                       onKeyDown={(e) => e.key === "Enter" && sendChat()}
                       placeholder={t("typeMessage")}
                       disabled={chatLoading || chatLimitHit}
-                      className="flex-1 min-w-0 rounded-xl border border-zinc-700 bg-zinc-800/50 px-4 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none disabled:opacity-50"
+                      className="flex-1 min-w-0 rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-shary focus:outline-none disabled:opacity-50"
                     />
                     <button
                       onClick={toggleListening}
                       disabled={chatLoading || chatLimitHit}
                       className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors disabled:opacity-50 ${
-                        listening ? "bg-red-500 text-white animate-pulse" : "bg-zinc-800 text-amber-400 hover:bg-zinc-700"
+                        listening ? "bg-red-500 text-white animate-pulse" : "bg-zinc-100 text-shary-dark hover:bg-zinc-200"
                       }`}
                     >
                       <Mic className="h-5 w-5" />
@@ -999,7 +607,7 @@ export function InputScreen() {
                     <button
                       onClick={() => sendChat()}
                       disabled={chatLoading || chatLimitHit || !chatInput.trim()}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 text-black hover:brightness-110 disabled:opacity-50"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-shary text-white hover:bg-shary-dark disabled:opacity-50"
                     >
                       <Send className="h-5 w-5" />
                     </button>
@@ -1009,17 +617,6 @@ export function InputScreen() {
             </div>
           )}
 
-
-
-          {/* Demo Report */}
-          {history.length === 0 && (
-            <button
-              onClick={handleDemo}
-              className="w-full text-center text-xs text-zinc-500 underline hover:text-amber-400 mt-3"
-            >
-              {lang === "ar" ? "شوف مثال لتحليل توضيحي" : "See an example analysis"}
-            </button>
-          )}
         </div>
       </div>
     </div>

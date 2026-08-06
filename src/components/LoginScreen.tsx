@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Sparkles, Mail, Lock, ChevronLeft, User } from "lucide-react";
 
 export function LoginScreen() {
-  const { t, lang, dir, navigate, signIn, signUp, showToast, pendingAction, setPendingAction, currentReport } = useApp();
+  const { t, lang, dir, navigate, signIn, signUp, showToast, pendingAction, setPendingAction } = useApp();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,7 +37,7 @@ export function LoginScreen() {
         pendingAction();
         setPendingAction(null);
       } else {
-        navigate(currentReport ? "report" : "input");
+        navigate("input");
       }
       return;
     }
@@ -97,30 +97,30 @@ export function LoginScreen() {
       pendingAction();
       setPendingAction(null);
     } else {
-      navigate(currentReport ? "report" : "input");
+      navigate("input");
     }
   };
 
   const handleGuest = () => {
-    navigate(currentReport ? "report" : "input");
+    navigate("input");
   };
 
   return (
     <div className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center px-4 py-6">
       <div className="mb-8 text-center">
-        <div className="mb-3 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-xl shadow-amber-500/20">
-          <Sparkles className="h-8 w-8 text-[#0B0B0F]" />
+        <div className="mb-3 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-shary to-shary-dark shadow-xl shadow-shary/20">
+          <Sparkles className="h-8 w-8 text-[#FFFFFF]" />
         </div>
-        <h1 className="font-serif text-2xl font-bold text-amber-400">{t("appName")}</h1>
+        <h1 className="text-2xl font-bold text-shary-dark">{t("appName")}</h1>
         <p className="mt-1 text-sm text-zinc-400">{t("welcomeBack")}</p>
       </div>
 
-      <div className="w-full rounded-2xl border border-amber-500/15 bg-gradient-to-b from-zinc-900/80 to-[#0B0B0F] p-6 shadow-2xl">
+      <div className="w-full rounded-2xl border border-shary/15 bg-gradient-to-b from-zinc-900/80 to-[#FFFFFF] p-6 shadow-2xl">
         <div className="mb-6 flex gap-2">
           <button
             onClick={() => setMode("login")}
             className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-              mode === "login" ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30" : "text-zinc-400 hover:text-amber-400"
+              mode === "login" ? "bg-shary/20 text-shary-dark ring-1 ring-shary/30" : "text-zinc-400 hover:text-shary-dark"
             }`}
           >
             {t("login")}
@@ -128,7 +128,7 @@ export function LoginScreen() {
           <button
             onClick={() => setMode("signup")}
             className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-              mode === "signup" ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30" : "text-zinc-400 hover:text-amber-400"
+              mode === "signup" ? "bg-shary/20 text-shary-dark ring-1 ring-shary/30" : "text-zinc-400 hover:text-shary-dark"
             }`}
           >
             {t("signup")}
@@ -138,20 +138,20 @@ export function LoginScreen() {
         <div className="space-y-4">
           {mode === "signup" && (
             <div className="space-y-1.5">
-              <Label className="text-sm font-medium text-zinc-300">{t("profileName")}</Label>
+              <Label className="text-sm font-medium text-zinc-700">{t("profileName")}</Label>
               <div className="relative">
                 <User className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600 ${dir === "rtl" ? "right-3" : "left-3"}`} />
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t("profileName")}
-                  className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${dir === "rtl" ? "pr-10" : "pl-10"}`}
+                  className={`border-zinc-200 bg-zinc-50 text-zinc-900 placeholder:text-zinc-400 focus:border-shary/50 ${dir === "rtl" ? "pr-10" : "pl-10"}`}
                 />
               </div>
             </div>
           )}
           <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("email")}</Label>
+            <Label className="text-sm font-medium text-zinc-700">{t("email")}</Label>
             <div className="relative">
               <Mail className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600 ${dir === "rtl" ? "right-3" : "left-3"}`} />
               <Input
@@ -159,12 +159,12 @@ export function LoginScreen() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${dir === "rtl" ? "pr-10" : "pl-10"}`}
+                className={`border-zinc-200 bg-zinc-50 text-zinc-900 placeholder:text-zinc-400 focus:border-shary/50 ${dir === "rtl" ? "pr-10" : "pl-10"}`}
               />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("password")}</Label>
+            <Label className="text-sm font-medium text-zinc-700">{t("password")}</Label>
             <div className="relative">
               <Lock className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600 ${dir === "rtl" ? "right-3" : "left-3"}`} />
               <Input
@@ -172,7 +172,7 @@ export function LoginScreen() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${dir === "rtl" ? "pr-10" : "pl-10"}`}
+                className={`border-zinc-200 bg-zinc-50 text-zinc-900 placeholder:text-zinc-400 focus:border-shary/50 ${dir === "rtl" ? "pr-10" : "pl-10"}`}
               />
             </div>
           </div>
@@ -181,7 +181,7 @@ export function LoginScreen() {
         <Button
           onClick={handleSubmit}
           disabled={loading}
-          className="mt-6 w-full bg-gradient-to-r from-amber-400 to-amber-600 text-[#0B0B0F] font-bold hover:from-amber-300 hover:to-amber-500 disabled:opacity-50"
+          className="mt-6 w-full bg-gradient-to-r from-shary to-shary-dark text-[#FFFFFF] font-bold hover:from-shary hover:to-shary-dark disabled:opacity-50"
         >
           {loading ? "..." : mode === "login" ? t("login") : t("signup")}
         </Button>
@@ -190,7 +190,7 @@ export function LoginScreen() {
           <p className="text-xs text-zinc-600">{t("orContinueAs")}</p>
           <button
             onClick={handleGuest}
-            className="mt-2 text-sm font-medium text-amber-400 hover:text-amber-300"
+            className="mt-2 text-sm font-medium text-shary-dark hover:text-shary-dark"
           >
             {t("guest")}
           </button>
@@ -198,8 +198,8 @@ export function LoginScreen() {
       </div>
 
       <button
-        onClick={() => navigate(currentReport ? "report" : "input")}
-        className="mt-6 flex items-center gap-1 text-sm text-zinc-500 hover:text-amber-400"
+        onClick={() => navigate("input")}
+        className="mt-6 flex items-center gap-1 text-sm text-zinc-500 hover:text-shary-dark"
       >
         {dir === "rtl" ? <ChevronLeft className="h-4 w-4 rotate-180" /> : <ChevronLeft className="h-4 w-4" />}
         {t("back")}

@@ -45,12 +45,12 @@ export function TradeInScreen() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("input")}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-amber-400"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-50 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-shary-dark"
           >
             <ChevronLeft className={`h-5 w-5 ${dir === "rtl" ? "rotate-180" : ""}`} />
           </button>
           <div>
-            <h1 className="font-serif text-xl font-bold text-amber-400">
+            <h1 className="text-xl font-bold text-shary-dark">
               {lang === "ar" ? "خريطة الاستبدال الذكي" : "Smart Trade-in Map"}
             </h1>
             <p className="text-xs text-zinc-500">
@@ -58,7 +58,7 @@ export function TradeInScreen() {
             </p>
           </div>
         </div>
-        <div className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl bg-amber-400/10 text-amber-400">
+        <div className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl bg-shary/10 text-shary-dark">
           <RefreshCw className="h-5 w-5" />
         </div>
       </div>
@@ -66,9 +66,9 @@ export function TradeInScreen() {
       {!result ? (
         <div className="space-y-6">
           {/* Search Section */}
-          <div className="rounded-2xl border border-amber-500/20 bg-zinc-900/60 p-6 shadow-xl shadow-amber-500/5">
+          <div className="rounded-2xl border border-shary/20 bg-white/60 p-6 shadow-xl shadow-shary/5">
             <div className="mb-6">
-              <label className="mb-2 block text-sm font-bold text-zinc-300">
+              <label className="mb-2 block text-sm font-bold text-zinc-700">
                 {lang === "ar" ? "اكتب نوع جهازك" : "Device Name"}
               </label>
               <div className="relative">
@@ -76,14 +76,14 @@ export function TradeInScreen() {
                   value={deviceName}
                   onChange={(e) => setDeviceName(e.target.value)}
                   placeholder={lang === "ar" ? "مثلاً: iPhone 13 Pro أو MSI GL66" : "e.g. iPhone 13 Pro or MSI GL66"}
-                  className="h-14 border-zinc-700 bg-zinc-800/50 pl-12 text-lg text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 focus:ring-amber-500/20"
+                  className="h-14 border-zinc-200 bg-zinc-50 pl-12 text-lg text-zinc-900 placeholder:text-zinc-400 focus:border-shary/50 focus:ring-shary/20"
                 />
                 <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
               </div>
             </div>
 
             <div className="mb-6">
-              <label className="mb-3 block text-sm font-bold text-zinc-300">
+              <label className="mb-3 block text-sm font-bold text-zinc-700">
                 {lang === "ar" ? "حالة الجهاز" : "Condition"}
               </label>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -93,8 +93,8 @@ export function TradeInScreen() {
                     onClick={() => setCondition(key)}
                     className={`rounded-xl px-3 py-3 text-xs font-medium transition-all ${
                       condition === key
-                        ? "bg-amber-500 text-black shadow-lg shadow-amber-500/20"
-                        : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                        ? "bg-shary text-black shadow-lg shadow-shary/20"
+                        : "bg-zinc-50 text-zinc-400 hover:bg-zinc-700"
                     }`}
                   >
                     {label}
@@ -106,7 +106,7 @@ export function TradeInScreen() {
             <Button
               onClick={handleCalculate}
               disabled={!deviceName.trim()}
-              className="h-14 w-full bg-gradient-to-r from-amber-400 to-amber-600 text-lg font-bold text-black hover:from-amber-300 hover:to-amber-500 disabled:opacity-40"
+              className="h-14 w-full bg-gradient-to-r from-shary to-shary-dark text-lg font-bold text-black hover:from-shary hover:to-shary-dark disabled:opacity-40"
             >
               {lang === "ar" ? "اعرف السعر الحقيقي" : "Get Real Market Price"}
             </Button>
@@ -114,31 +114,31 @@ export function TradeInScreen() {
 
           {/* Market Stats */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
                 <Globe className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-[10px] text-zinc-500">تحديثات يومية</p>
-                <p className="text-xs font-bold text-zinc-300">أسعار السوق اليوم</p>
+                <p className="text-xs font-bold text-zinc-700">أسعار السوق اليوم</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
                 <Users className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-[10px] text-zinc-500">أكثر من 500 جروب</p>
-                <p className="text-xs font-bold text-zinc-300">متابعة فيسبوك</p>
+                <p className="text-xs font-bold text-zinc-700">متابعة فيسبوك</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10 text-purple-400">
                 <Store className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-[10px] text-zinc-500">تجار معتمدين</p>
-                <p className="text-xs font-bold text-zinc-300">أسعار المحلات</p>
+                <p className="text-xs font-bold text-zinc-700">أسعار المحلات</p>
               </div>
             </div>
           </div>
@@ -146,12 +146,12 @@ export function TradeInScreen() {
       ) : (
         <div className="space-y-6">
           {/* Result Header */}
-          <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-amber-500/10 to-amber-600/5 p-6 border border-amber-500/20">
+          <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-shary/10 to-shary-dark/5 p-6 border border-shary/20">
             <div>
-              <p className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">نتائج التقييم لـ</p>
-              <h2 className="text-2xl font-bold text-zinc-100">{deviceName}</h2>
+              <p className="text-xs font-bold text-shary uppercase tracking-wider mb-1">نتائج التقييم لـ</p>
+              <h2 className="text-2xl font-bold text-zinc-900">{deviceName}</h2>
               <div className="mt-2 flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400">
+                <span className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[10px] text-zinc-400">
                   <CheckCircle2 className="h-3 w-3" /> {conditionLabelsAr[condition]}
                 </span>
                 {result.marketStatus === "hot" && (
@@ -163,7 +163,7 @@ export function TradeInScreen() {
             </div>
             <button 
               onClick={() => setResult(null)}
-              className="text-xs text-zinc-500 hover:text-amber-400"
+              className="text-xs text-zinc-500 hover:text-shary-dark"
             >
               بحث جديد
             </button>
@@ -172,14 +172,14 @@ export function TradeInScreen() {
           {/* The Map (Pricing Tiers) */}
           <div className="grid grid-cols-1 gap-4">
             {/* Facebook Groups - Highest */}
-            <div className="group relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 transition-all hover:border-blue-500/30">
+            <div className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/60 p-5 transition-all hover:border-blue-500/30">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
                     <Users className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-zinc-100">جروبات الفيسبوك</h3>
+                    <h3 className="font-bold text-zinc-900">جروبات الفيسبوك</h3>
                     <p className="text-xs text-zinc-500">أعلى سعر (محتاج وقت ومجهود)</p>
                   </div>
                 </div>
@@ -191,36 +191,36 @@ export function TradeInScreen() {
             </div>
 
             {/* Direct Sale - Average */}
-            <div className="group relative overflow-hidden rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6 transition-all shadow-lg shadow-amber-500/5">
-              <div className="absolute right-0 top-0 rounded-bl-xl bg-amber-500 px-3 py-1 text-[10px] font-bold text-black">
+            <div className="group relative overflow-hidden rounded-2xl border border-shary/30 bg-shary/5 p-6 transition-all shadow-lg shadow-shary/5">
+              <div className="absolute right-0 top-0 rounded-bl-xl bg-shary px-3 py-1 text-[10px] font-bold text-black">
                 الأكثر واقعية
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-400 text-black">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-shary text-black">
                     <Globe className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-zinc-100">بيع مباشر (OLX / Dubizzle)</h3>
+                    <h3 className="font-bold text-zinc-900">بيع مباشر (OLX / Dubizzle)</h3>
                     <p className="text-xs text-zinc-400">سعر السوق العادل</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-3xl font-bold text-amber-400">{result.directSale.toLocaleString()} <span className="text-sm">ج.م</span></p>
+                  <p className="text-3xl font-bold text-shary-dark">{result.directSale.toLocaleString()} <span className="text-sm">ج.م</span></p>
                   <p className="text-[10px] text-zinc-500">سعر التنفيذ الفعلي</p>
                 </div>
               </div>
             </div>
 
             {/* Trade-in - Lowest */}
-            <div className="group relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 transition-all hover:border-purple-500/30">
+            <div className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/60 p-5 transition-all hover:border-purple-500/30">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
                     <Store className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-zinc-100">استبدال في المحلات</h3>
+                    <h3 className="font-bold text-zinc-900">استبدال في المحلات</h3>
                     <p className="text-xs text-zinc-500">أسرع كاش (بسعر أقل)</p>
                   </div>
                 </div>
@@ -233,25 +233,25 @@ export function TradeInScreen() {
           </div>
 
           {/* Insights */}
-          <div className="rounded-2xl bg-zinc-900/40 p-5 border border-zinc-800">
-            <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-zinc-300">
-              <Info className="h-4 w-4 text-amber-400" /> نصيحة "قراري" ليك:
+          <div className="rounded-2xl bg-zinc-50 p-5 border border-zinc-200">
+            <h4 className="mb-4 flex items-center gap-2 text-sm font-bold text-zinc-700">
+              <Info className="h-4 w-4 text-shary-dark" /> نصيحة "شاري" ليك:
             </h4>
             <div className="space-y-3">
               <div className="flex gap-3">
-                <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-shary" />
                 <p className="text-xs leading-relaxed text-zinc-400">
                   لو مش مستعجل، اعرضه على جروبات <strong>"Used iPhones Egypt"</strong> أو <strong>"Laptop Marketplace"</strong> بفرق 2000 جنيه زيادة عن سعر OLX.
                 </p>
               </div>
               <div className="flex gap-3">
-                <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-shary" />
                 <p className="text-xs leading-relaxed text-zinc-400">
                   المحلات في "السراج" أو "مول البستان" هتاخده منك بـ <strong>{result.tradeIn.toLocaleString()} ج.م</strong> كاش فوري، وده خيار ممتاز لو هتشتري الجديد من عندهم.
                 </p>
               </div>
               <div className="flex gap-3">
-                <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-shary" />
                 <p className="text-xs leading-relaxed text-zinc-400">
                   سعر الـ {deviceName} حالياً <strong>{result.marketStatus === "hot" ? "في العالي" : "مستقر"}</strong>، فده وقت مناسب للبيع قبل نزول الموديلات الجديدة.
                 </p>
@@ -262,7 +262,7 @@ export function TradeInScreen() {
           <Button
             onClick={() => setResult(null)}
             variant="outline"
-            className="w-full border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-amber-400"
+            className="w-full border-zinc-200 bg-zinc-50 text-zinc-400 hover:bg-zinc-50 hover:text-shary-dark"
           >
             حساب جهاز آخر
           </Button>

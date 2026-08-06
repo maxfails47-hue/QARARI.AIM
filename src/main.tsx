@@ -14,7 +14,7 @@ import "./index.css"
 // lives at a configurable path — never guessable "/admin" by default — as a
 // separate lightweight app that never shares state with the main consumer
 // app, and is gated by its own username/password on top of that.
-// Set VITE_ADMIN_ROUTE_SLUG in your env vars (e.g. "qarari-2511k26x");
+// Set VITE_ADMIN_ROUTE_SLUG in your env vars (e.g. "shary-2511k26x");
 // falls back to "/admin" if it isn't set.
 const adminSlug = (import.meta.env.VITE_ADMIN_ROUTE_SLUG as string) || "admin"
 const isAdminRoute = window.location.pathname.startsWith(`/${adminSlug}`)

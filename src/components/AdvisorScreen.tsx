@@ -95,18 +95,18 @@ export function AdvisorScreen() {
   return (
     <div className="mx-auto flex h-[calc(100vh-80px)] max-w-3xl flex-col px-4 py-4">
       {/* Premium Header */}
-      <div className="mb-4 flex items-center justify-between rounded-2xl bg-gradient-to-r from-amber-500/10 to-amber-600/5 p-4 border border-amber-500/20 shadow-lg shadow-amber-500/5">
+      <div className="mb-4 flex items-center justify-between rounded-2xl bg-gradient-to-r from-shary/10 to-shary-dark/5 p-4 border border-shary/20 shadow-lg shadow-shary/5">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400 text-black shadow-lg shadow-amber-500/20">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-shary text-black shadow-lg shadow-shary/20">
               <Bot className="h-7 w-7" />
             </div>
-            <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 border-2 border-[#0B0B0F]">
+            <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 border-2 border-[#FFFFFF]">
               <Zap className="h-3 w-3 text-white fill-white" />
             </div>
           </div>
           <div>
-            <h1 className="font-serif text-lg font-bold text-amber-400">
+            <h1 className="text-lg font-bold text-shary-dark">
               {lang === "ar" ? "المساعد الشخصي الذكي" : "Smart AI Advisor"}
             </h1>
             <div className="flex items-center gap-2">
@@ -117,24 +117,24 @@ export function AdvisorScreen() {
           </div>
         </div>
         {isPremium && (
-          <div className="hidden sm:flex items-center gap-2 rounded-full bg-amber-400/10 px-3 py-1 border border-amber-400/20">
-            <Sparkles className="h-3 w-3 text-amber-400" />
-            <span className="text-[10px] font-bold text-amber-400 uppercase">Premium Member</span>
+          <div className="hidden sm:flex items-center gap-2 rounded-full bg-shary/10 px-3 py-1 border border-shary/20">
+            <Sparkles className="h-3 w-3 text-shary-dark" />
+            <span className="text-[10px] font-bold text-shary-dark uppercase">Premium Member</span>
           </div>
         )}
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-900/40 p-6 mb-4 space-y-6 scrollbar-hide">
+      <div className="flex-1 overflow-y-auto rounded-3xl border border-zinc-200 bg-zinc-50 p-6 mb-4 space-y-6 scrollbar-hide">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="mb-6 relative">
-              <div className="absolute inset-0 blur-3xl bg-amber-500/20 rounded-full" />
-              <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-2xl shadow-amber-500/40">
+              <div className="absolute inset-0 blur-3xl bg-shary/20 rounded-full" />
+              <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-shary to-shary-dark shadow-2xl shadow-shary/40">
                 <Brain className="h-10 w-10 text-black" />
               </div>
             </div>
-            <h2 className="font-serif text-2xl font-bold text-zinc-100 mb-2">
+            <h2 className="text-2xl font-bold text-zinc-900 mb-2">
               {lang === "ar" ? "أهلاً بك في المستقبل" : "Welcome to the Future"}
             </h2>
             <p className="text-sm text-zinc-500 max-w-xs mb-8">
@@ -148,7 +148,7 @@ export function AdvisorScreen() {
                 <button
                   key={i}
                   onClick={() => { setInput(q); }}
-                  className="rounded-2xl border border-zinc-800 bg-zinc-800/30 p-4 text-right text-xs text-zinc-400 transition-all hover:border-amber-500/30 hover:bg-amber-500/5 hover:text-amber-400"
+                  className="rounded-2xl border border-zinc-200 bg-zinc-50/30 p-4 text-right text-xs text-zinc-400 transition-all hover:border-shary/30 hover:bg-shary/5 hover:text-shary-dark"
                 >
                   {q}
                 </button>
@@ -161,8 +161,8 @@ export function AdvisorScreen() {
           <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-sm ${
               msg.role === "user" 
-                ? "bg-amber-500 text-black font-medium rounded-tr-none" 
-                : "bg-zinc-800 text-zinc-100 border border-zinc-700 rounded-tl-none"
+                ? "bg-shary text-black font-medium rounded-tr-none" 
+                : "bg-zinc-50 text-zinc-900 border border-zinc-200 rounded-tl-none"
             }`}>
               <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
             </div>
@@ -170,10 +170,10 @@ export function AdvisorScreen() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-tl-none px-5 py-3 flex gap-1">
-              <div className="h-1.5 w-1.5 bg-amber-400 rounded-full animate-bounce" />
-              <div className="h-1.5 w-1.5 bg-amber-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-              <div className="h-1.5 w-1.5 bg-amber-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+            <div className="bg-zinc-50 border border-zinc-200 rounded-2xl rounded-tl-none px-5 py-3 flex gap-1">
+              <div className="h-1.5 w-1.5 bg-shary rounded-full animate-bounce" />
+              <div className="h-1.5 w-1.5 bg-shary rounded-full animate-bounce [animation-delay:0.2s]" />
+              <div className="h-1.5 w-1.5 bg-shary rounded-full animate-bounce [animation-delay:0.4s]" />
             </div>
           </div>
         )}
@@ -183,32 +183,32 @@ export function AdvisorScreen() {
       {/* Input Area */}
       <div className="relative">
         <div className="absolute -top-12 left-0 right-0 flex justify-center px-4 pointer-events-none">
-          <div className="bg-zinc-900/80 backdrop-blur-md border border-amber-500/20 rounded-full px-4 py-1.5 flex items-center gap-2 shadow-xl pointer-events-auto">
+          <div className="bg-white backdrop-blur-md border border-shary/20 rounded-full px-4 py-1.5 flex items-center gap-2 shadow-xl pointer-events-auto">
             <TrendingUp className="h-3 w-3 text-emerald-400" />
-            <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">
+            <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-wider">
               {lang === "ar" ? "أسعار السوق محدثة الآن" : "Market prices updated now"}
             </span>
           </div>
         </div>
         
-        <div className="flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-2 shadow-2xl focus-within:border-amber-500/50 transition-colors">
+        <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl focus-within:border-shary/50 transition-colors">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             placeholder={lang === "ar" ? "اسألني أي حاجة..." : "Ask me anything..."}
-            className="flex-1 border-none bg-transparent text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-0 h-12"
+            className="flex-1 border-none bg-transparent text-zinc-900 placeholder:text-zinc-400 focus-visible:ring-0 h-12"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || loading}
-            className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-400 text-black transition-all hover:bg-amber-300 disabled:opacity-40 shadow-lg shadow-amber-500/20"
+            className="flex h-12 w-12 items-center justify-center rounded-xl bg-shary text-black transition-all hover:bg-shary disabled:opacity-40 shadow-lg shadow-shary/20"
           >
             <Send className="h-5 w-5" />
           </button>
         </div>
         <p className="mt-2 text-center text-[10px] text-zinc-600">
-          Powered by Qarari Intelligence • Egyptian Market Data v2.4
+          Powered by Shary Intelligence • Egyptian Market Data v2.4
         </p>
       </div>
     </div>

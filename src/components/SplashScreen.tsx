@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 // -> Scene 3: wordmark + tagline. Skips itself entirely if already shown
 // this session, and is never shown on the admin route.
 
-const SESSION_KEY = "qarari_splash_shown";
+const SESSION_KEY = "shary_splash_shown";
 const SCENE1_MS = 2000;
 const SCENE2_START = 2400;
 const SCENE2_STRIKE = 3100;
@@ -125,7 +125,7 @@ export function SplashScreen({ onFinish }: { onFinish: () => void }) {
           className="absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-700"
           style={{ opacity: scene === 1 ? 1 : 0 }}
         >
-          <p className="text-2xl font-light leading-relaxed text-zinc-200">
+          <p className="text-2xl font-light leading-relaxed text-zinc-800">
             كل يوم بتتخذ <span className="font-semibold text-gold">قرارات شراء</span>
             <br />
             من غير ما تعرف السعر العادل فعلاً
@@ -153,7 +153,7 @@ export function SplashScreen({ onFinish }: { onFinish: () => void }) {
               25,000 ج.م
             </span>
             <span className="text-xl text-gold">←</span>
-            <span className="text-3xl font-bold text-amber-200">18,500 ج.م</span>
+            <span className="text-3xl font-bold text-shary-light">18,500 ج.م</span>
           </div>
           <div
             className="mt-5 inline-flex flex-col items-center gap-1 rounded-2xl border px-8 py-3.5 transition-all duration-500"
@@ -190,7 +190,7 @@ export function SplashScreen({ onFinish }: { onFinish: () => void }) {
               WebkitTextFillColor: "transparent",
             }}
           >
-            Qarari.AI
+            Shary
           </div>
           <p className="mt-2.5 text-sm text-zinc-400">
             حلّل أي قرار شراء في ثواني، قبل ما تدفع زيادة

@@ -38,10 +38,10 @@ async function resetMonthlyScans(admin: any) {
       try {
         await sendEmail(
           u.email,
-          "تحليلاتك المجانية رجعت! 🎉 — Qarari.AI",
+          "تحليلاتك المجانية رجعت! 🎉 — Shary",
           `<p>أهلاً ${name}،</p>
-           <p>تحليلاتك الثلاثة المجانية على قراري رجعت تاني الشهر ده. ارجع افتح التطبيق وقارن سعر أي حاجة بتفكر تشتريها قبل ما تدفع فلوسك.</p>
-           <p>Hi ${name}, your 3 free analyses on Qarari just renewed for this month. Come back and check the fair price on your next purchase before you pay.</p>`
+           <p>تحليلاتك الثلاثة المجانية على شاري رجعت تاني الشهر ده. ارجع افتح التطبيق وقارن سعر أي حاجة بتفكر تشتريها قبل ما تدفع فلوسك.</p>
+           <p>Hi ${name}, your 3 free analyses on Shary just renewed for this month. Come back and check the fair price on your next purchase before you pay.</p>`
         );
       } catch (e: any) {
         console.error("[cron] Failed to send scans-reset nudge email to", u.email, ":", e?.message || e);
@@ -117,7 +117,7 @@ async function checkWatchlistPriceDrops(admin: any) {
       if (currentPrice <= dropThreshold && row.users?.email) {
         await sendEmail(
           row.users.email,
-          `نزل سعر ${row.product}! — Qarari.AI`,
+          `نزل سعر ${row.product}! — Shary`,
           `<p>السعر الحالي المقدّر لـ ${row.product} أصبح ${currentPrice.toLocaleString()} ${row.currency}، أقل من ${row.saved_price.toLocaleString()} ${row.currency} اللي كنت متابعه.</p>
            <p>The estimated price for ${row.product} dropped to ${currentPrice.toLocaleString()} ${row.currency}, down from your saved ${row.saved_price.toLocaleString()} ${row.currency}.</p>`
         );

@@ -16,7 +16,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Qarari.AI <onboarding@resend.dev>", // replace with a verified domain sender once one is set up
+        from: "Shary <onboarding@resend.dev>", // replace with a verified domain sender once one is set up
         to: [to],
         subject,
         html,

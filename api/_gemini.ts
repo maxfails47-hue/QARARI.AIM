@@ -121,7 +121,7 @@ const GEMINI_PRICE_SCHEMA = {
  * contract (system + user text in, parsed object out) so it's a drop-in
  * fallback wherever a Groq structured call is exhausted.
  */
-async function callGeminiStructured(
+export async function callGeminiStructured(
   system: string,
   user: string,
   schema: Record<string, any>,

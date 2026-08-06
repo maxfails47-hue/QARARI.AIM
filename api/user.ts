@@ -64,8 +64,8 @@ function checkFairUseRateLimit(identifier: string, planName: string, monthlyQuot
     return {
       allowed: false,
       message: {
-        ar: "أنت بتستخدم قراري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
-        en: "You're using Qarari at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are محفوظ.",
+        ar: "أنت بتستخدم شاري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
+        en: "You're using Shary at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are محفوظ.",
       },
     };
   }
@@ -88,8 +88,8 @@ function checkFairUseRateLimit(identifier: string, planName: string, monthlyQuot
     return {
       allowed: false,
       message: {
-        ar: "أنت بتستخدم قراري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
-        en: "You're using Qarari at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are protected.",
+        ar: "أنت بتستخدم شاري بسرعة عالية جداً. عشان نحافظ على الخدمة سريعة وموثوقة للجميع، بعض الطلبات ممكن تتأخر مؤقتاً. رصيدك المتبقي محفوظ.",
+        en: "You're using Shary at a very high speed. To keep the service fast and reliable for everyone, some requests may be temporarily slowed down. Your remaining credits are protected.",
       },
     };
   }

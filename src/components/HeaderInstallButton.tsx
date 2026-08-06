@@ -16,7 +16,7 @@ import {
 // Chrome/Android install prompt directly, or — on iOS, where there's no
 // programmatic prompt — reveals a small tooltip with the manual steps.
 
-const SEEN_KEY = "qarari-header-install-badge-seen";
+const SEEN_KEY = "shary-header-install-badge-seen";
 
 export function HeaderInstallButton({
   variant = "badge",
@@ -97,9 +97,9 @@ export function HeaderInstallButton({
       <div>
         <button
           onClick={handleClick}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm text-zinc-200 transition-colors hover:bg-zinc-800/70"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm text-zinc-800 transition-colors hover:bg-zinc-50/70"
         >
-          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-[#0B0B0F]">
+          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-shary to-shary-dark text-[#FFFFFF]">
             <Download className="h-4 w-4" strokeWidth={2.5} />
             {showDot && (
               <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-zinc-900" />
@@ -124,18 +124,18 @@ export function HeaderInstallButton({
         onClick={handleClick}
         aria-label={t("installHeaderHint")}
         title={t("installHeaderHint")}
-        className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-[#0B0B0F] shadow-md shadow-amber-500/25 transition-transform active:scale-95"
+        className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-shary to-shary-dark text-[#FFFFFF] shadow-md shadow-shary/25 transition-transform active:scale-95"
       >
         <Download className="h-4 w-4" strokeWidth={2.5} />
         {showDot && (
-          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#0B0B0F]" />
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#FFFFFF]" />
         )}
       </button>
 
       {showTooltip && (
         <div
           dir={dir}
-          className={`absolute top-11 z-50 w-40 rounded-lg border border-amber-500/25 bg-zinc-900 px-2.5 py-2 text-[11px] leading-snug text-zinc-200 shadow-xl ${
+          className={`absolute top-11 z-50 w-40 rounded-lg border border-shary/25 bg-white px-2.5 py-2 text-[11px] leading-snug text-zinc-800 shadow-xl ${
             dir === "rtl" ? "right-0" : "left-0"
           }`}
         >

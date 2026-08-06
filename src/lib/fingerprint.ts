@@ -41,9 +41,9 @@ export async function getDeviceFingerprint(): Promise<string> {
       ctx.fillStyle = "#f60";
       ctx.fillRect(100, 1, 62, 20);
       ctx.fillStyle = "#069";
-      ctx.fillText("Qarari.FP", 2, 2);
+      ctx.fillText("Shary.FP", 2, 2);
       ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
-      ctx.fillText("Qarari.FP", 4, 17);
+      ctx.fillText("Shary.FP", 4, 17);
       const dataUrl = canvas.toDataURL();
       components.push("canvas:" + simpleHash(dataUrl));
     }
@@ -121,7 +121,7 @@ function simpleHash(str: string): string {
 // Cache the fingerprint for the session (no need to recompute every time)
 let cachedFingerprint: string | null = null;
 
-const DEVICE_ID_KEY = "qarari_device_id";
+const DEVICE_ID_KEY = "shary_device_id";
 
 function generateRandomId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {

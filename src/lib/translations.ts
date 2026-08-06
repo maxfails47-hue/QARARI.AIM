@@ -2,7 +2,7 @@ import type { Language } from "@/lib/types";
 
 export const translations: Record<Language, Record<string, string>> = {
   ar: {
-    appName: "Qarari.AI",
+    appName: "Shary",
     tagline: "حلّل قرار الشراء قبل ما تندم",
     analyzeDecision: "حلّل القرار",
     newDecision: "قرار جديد",
@@ -139,7 +139,7 @@ export const translations: Record<Language, Record<string, string>> = {
     premiumCompareFeature: "10 مقارنات بين المنتجات شهريًا",
     premiumChatFeature: "150 رسالة شات شهريًا مع مساعد الـ AI",
     valueSectionTitle: "بتوفّر كام فعليًا؟",
-    valueMessage: "لو قدرت تتجنب غلطة شراء واحدة بس بقراري",
+    valueMessage: "لو قدرت تتجنب غلطة شراء واحدة بس بشاري",
     valueBanner: "قرار صح واحد بيرجعلك اشتراك شهور",
     chatUnlimitedBadge: "150 رسالة شهريًا ✨",
     subscribeNow: "اشترك الآن",
@@ -208,14 +208,14 @@ export const translations: Record<Language, Record<string, string>> = {
     selectPlan: "اختر الباقة المناسبة",
     oneTimeUsage: "استخدام لمرة واحدة",
     monthlySubscription: "اشتراك شهري",
-    installTitle: "ثبّت قراري على شاشتك الرئيسية",
-    installSubtitle: "حمّل قراري ع الشاشة، ووفّر آلاف الجنيهات بضغطة زر",
+    installTitle: "ثبّت شاري على شاشتك الرئيسية",
+    installSubtitle: "حمّل شاري ع الشاشة، ووفّر آلاف الجنيهات بضغطة زر",
     installBtn: "تثبيت",
     installDismiss: "لاحقًا",
-    installIosTitle: "ثبّت قراري على شاشتك الرئيسية",
+    installIosTitle: "ثبّت شاري على شاشتك الرئيسية",
     installIosStep1: "اضغط على زر المشاركة",
     installIosStep2: "ثم اختر \"إضافة إلى الشاشة الرئيسية\"",
-    installHeaderHint: "ثبّت تطبيق قراري على شاشتك الرئيسية",
+    installHeaderHint: "ثبّت تطبيق شاري على شاشتك الرئيسية",
     installManualHint: "افتح قائمة المتصفح (⋮) بالأعلى واختر \"تثبيت التطبيق\" أو \"إضافة إلى الشاشة الرئيسية\"",
 
     // ─── Section 1: First-run onboarding ───
@@ -223,7 +223,7 @@ export const translations: Record<Language, Record<string, string>> = {
     onboardingNext: "التالي",
     onboardingStart: "ابدأ الآن",
     onboardingSlide1Chip: "؟ يستاهل السعر ده",
-    onboardingSlide1Headline: "هتشتري حاجة؟\nاسأل قراري الأول",
+    onboardingSlide1Headline: "هتشتري حاجة؟\nاسأل شاري الأول",
     onboardingSlide1Body: "قبل ما تدفع، وصف المنتج بالسعر اللي عرضوه عليك — وسيبنا نقولك لو ده قرار صح ولا لأ.",
     onboardingSlide2Chip: "📸 صورة واحدة كفاية",
     onboardingSlide2Headline: "سكرين شوت بس\nمن أي حاجة أونلاين",
@@ -243,7 +243,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // ─── Section 2: Persistent "How it works" help sheet ───
     helpButtonLabel: "طريقة الاستخدام",
-    helpSheetTitle: "قراري بيشتغل إزاي",
+    helpSheetTitle: "شاري بيشتغل إزاي",
     helpStep1: "١. وصف المنتج والسعر اللي اتعرض عليك.",
     helpStep2: "٢. بنقارنه بسعر السوق الحقيقي والحي.",
     helpStep3: "٣. تاخد قرار واضح — صفقة جيدة ولا لأ — بالأسباب.",
@@ -265,11 +265,11 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // ─── Section 3b: Shareable verdict card (TikTok/story-style image) ───
     shareCardTagline: "حللت قبل ما أندم 😅",
-    shareCardHookBad: "وقعت في فخ سعر؟ قراري كشفه في ثواني",
-    shareCardHookGood: "السعر ده فرصة حقيقية ولا لأ؟ قراري قالها بالدليل",
+    shareCardHookBad: "وقعت في فخ سعر؟ شاري كشفه في ثواني",
+    shareCardHookGood: "السعر ده فرصة حقيقية ولا لأ؟ شاري قالها بالدليل",
     shareCardPctOverpriced: "مبالغ فيه بنسبة",
     shareCardPctCheaper: "أرخص من السوق بنسبة",
-    shareCardFooterCta: "🔍 جرّب أول تحليلاتك مجانًا على Qarari.AI",
+    shareCardFooterCta: "🔍 جرّب أول تحليلاتك مجانًا على Shary",
     shareCardFairLockNote: "🔒 التفاصيل الكاملة جوه التطبيق",
     shareCardSaved: "اتحفظت صورة القرار — تقدر تشاركها من الجاليري",
 
@@ -284,7 +284,7 @@ export const translations: Record<Language, Record<string, string>> = {
     priceParseHint: "اكتب السعر بالأرقام: 50000 أو 50 الف",
   },
   en: {
-    appName: "Qarari.AI",
+    appName: "Shary",
     tagline: "Analyze your purchase decision before you regret",
     analyzeDecision: "Analyze Decision",
     newDecision: "New Decision",
@@ -490,14 +490,14 @@ export const translations: Record<Language, Record<string, string>> = {
     selectPlan: "Select the right plan",
     oneTimeUsage: "One-time usage",
     monthlySubscription: "Monthly subscription",
-    installTitle: "Install Qarari on your home screen",
-    installSubtitle: "Install Qarari and save thousands with one tap",
+    installTitle: "Install Shary on your home screen",
+    installSubtitle: "Install Shary and save thousands with one tap",
     installBtn: "Install",
     installDismiss: "Later",
-    installIosTitle: "Install Qarari on your home screen",
+    installIosTitle: "Install Shary on your home screen",
     installIosStep1: "Tap the Share button",
     installIosStep2: "Then choose \"Add to Home Screen\"",
-    installHeaderHint: "Install the Qarari app on your home screen",
+    installHeaderHint: "Install the Shary app on your home screen",
     installManualHint: "Open the browser menu (⋮) at the top and choose \"Install app\" or \"Add to Home screen\"",
 
     // ─── Section 1: First-run onboarding ───
@@ -505,7 +505,7 @@ export const translations: Record<Language, Record<string, string>> = {
     onboardingNext: "Next",
     onboardingStart: "Start now",
     onboardingSlide1Chip: "Is this price worth it?",
-    onboardingSlide1Headline: "Buying something?\nAsk Qarari first",
+    onboardingSlide1Headline: "Buying something?\nAsk Shary first",
     onboardingSlide1Body: "Before you pay, describe the product and the price you were offered — and let us tell you if it's the right call or not.",
     onboardingSlide2Chip: "📸 One photo is enough",
     onboardingSlide2Headline: "Just a screenshot\nfrom anywhere online",
@@ -525,7 +525,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // ─── Section 2: Persistent "How it works" help sheet ───
     helpButtonLabel: "How it works",
-    helpSheetTitle: "How Qarari works",
+    helpSheetTitle: "How Shary works",
     helpStep1: "1. Describe the product and the price you were offered.",
     helpStep2: "2. We compare it to the real, live market price.",
     helpStep3: "3. You get a clear verdict — good deal or not — with reasons.",
@@ -547,11 +547,11 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // ─── Section 3b: Shareable verdict card (TikTok/story-style image) ───
     shareCardTagline: "I checked before I regretted it 😅",
-    shareCardHookBad: "Fell for a price trap? Qarari caught it in seconds",
-    shareCardHookGood: "Is this price a real deal? Qarari has the proof",
+    shareCardHookBad: "Fell for a price trap? Shary caught it in seconds",
+    shareCardHookGood: "Is this price a real deal? Shary has the proof",
     shareCardPctOverpriced: "Overpriced by",
     shareCardPctCheaper: "Cheaper than market by",
-    shareCardFooterCta: "🔍 Try your first free analyses on Qarari.AI",
+    shareCardFooterCta: "🔍 Try your first free analyses on Shary",
     shareCardFairLockNote: "🔒 Full details inside the app",
     shareCardSaved: "Verdict image saved — you can share it from your gallery",
 

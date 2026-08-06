@@ -47,7 +47,7 @@ function AdminLogin({ onSuccess, expiredNotice }: { onSuccess: () => void; expir
           <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-lg">
             <Shield className="h-7 w-7 text-[#0B0B0F]" />
           </div>
-          <h1 className="font-serif text-xl font-bold text-amber-400">لوحة تحكم Qarari.AI</h1>
+          <h1 className="font-serif text-xl font-bold text-amber-400">لوحة تحكم Shary</h1>
           <p className="mt-1 text-xs text-zinc-500">Admin Dashboard</p>
         </div>
 
@@ -493,7 +493,7 @@ export default function AdminApp() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600">
               <Shield className="h-4 w-4 text-[#0B0B0F]" />
             </div>
-            <span className="font-serif text-sm font-bold text-amber-400">لوحة تحكم Qarari.AI</span>
+            <span className="font-serif text-sm font-bold text-amber-400">لوحة تحكم Shary</span>
           </div>
           <button
             onClick={() => { clearCreds(); setAuthed(false); }}

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<title>Shary — Preview</title>
+<style>
+  :root{
+    --green:#00B884;
+    --green-dark:#059669;
+    --green-light:#E6FAF3;
+    --red:#EF4444;
+    --ink:#0F172A;
+    --sub:#64748B;
+    --line:#EEF1F4;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:#F7F8FA; color:var(--ink);
+    font-family:"Segoe UI", Tahoma, Arial, sans-serif;
+  }
+  .phone{
+    max-width:420px; margin:24px auto; background:#fff; min-height:840px;
+    border-radius:28px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.12);
+    border:1px solid var(--line);
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; border-bottom:1px solid var(--line); background:#fff;
+    position:sticky; top:0; z-index:10;
+  }
+  .brand{display:flex; align-items:center; gap:8px;}
+  .logo{
+    width:36px; height:36px; border-radius:10px; background:var(--green);
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:18px; box-shadow:0 6px 16px rgba(0,184,132,.35);
+  }
+  .brand-name{font-weight:800; font-size:17px; color:var(--green-dark); line-height:1;}
+  .brand-sub{font-size:10px; color:var(--sub); margin-top:2px;}
+  .icon-btn{
+    width:34px; height:34px; border-radius:50%; background:#F1F5F4;
+    display:flex; align-items:center; justify-content:center; font-size:15px; color:var(--sub);
+  }
+  .hero{padding:22px 16px 8px;}
+  .hero h1{font-size:20px; margin:0 0 4px; font-weight:800;}
+  .hero p{margin:0 0 14px; color:var(--sub); font-size:13px;}
+  .search{
+    display:flex; align-items:center; gap:8px; background:#F1F5F4;
+    border-radius:14px; padding:12px 14px; border:1px solid transparent;
+  }
+  .search input{
+    border:none; background:transparent; outline:none; flex:1; font-size:14px;
+    font-family:inherit; text-align:right;
+  }
+  .cats{display:flex; gap:8px; padding:14px 16px 4px; overflow-x:auto;}
+  .cat{
+    flex:0 0 auto; background:var(--green-light); color:var(--green-dark);
+    padding:8px 14px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap;
+  }
+  .section-title{
+    padding:18px 16px 8px; font-weight:800; font-size:14px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .section-title span.link{font-size:11px; color:var(--green-dark); font-weight:600;}
+  .card{
+    margin:0 16px 14px; border:1px solid var(--line); border-radius:16px; padding:12px;
+    display:flex; gap:12px; align-items:center; background:#fff;
+  }
+  .thumb{
+    width:64px; height:64px; border-radius:12px; background:#F1F5F4; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center; font-size:22px; color:#B9C2C6;
+    position:relative;
+  }
+  .badge{
+    position:absolute; top:-6px; right:-6px; background:var(--green); color:#fff;
+    font-size:10px; font-weight:800; border-radius:8px; padding:2px 5px;
+  }
+  .prod-name{font-size:13px; font-weight:700; margin:0 0 4px;}
+  .prod-meta{font-size:11px; color:var(--sub); margin:0 0 6px;}
+  .price-row{display:flex; align-items:baseline; gap:6px;}
+  .price{font-weight:800; font-size:15px;}
+  .old-price{font-size:11px; color:#B9C2C6; text-decoration:line-through;}
+  .discount{
+    background:#FEECEC; color:var(--red); font-size:10px; font-weight:800;
+    border-radius:6px; padding:1px 5px; margin-inline-start:4px;
+  }
+  .cheapest-tag{font-size:10px; color:var(--green-dark); font-weight:700; margin-top:4px;}
+
+  .analysis{
+    margin:16px; border:1px solid var(--line); border-radius:18px; overflow:hidden;
+  }
+  .analysis-head{
+    background:var(--green); color:#fff; padding:16px; text-align:center;
+  }
+  .analysis-head .score{font-size:34px; font-weight:800; line-height:1;}
+  .analysis-head .verdict{font-size:15px; font-weight:800; margin-top:4px;}
+  .why{padding:12px 16px; font-size:12px; color:var(--sub);}
+  .why li{margin-bottom:4px;}
+  .stores{padding:0 16px 16px; display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .store{
+    border:1px solid var(--line); border-radius:12px; padding:10px; font-size:11px;
+  }
+  .store.cheapest{border-color:var(--green); background:var(--green-light);}
+  .store .name{font-weight:700; margin-bottom:2px;}
+  .store .p{font-weight:800; font-size:13px;}
+  .store .stock{color:var(--green-dark); font-size:10px;}
+
+  .bottombar{
+    position:sticky; bottom:0; background:#fff; border-top:1px solid var(--line);
+    padding:12px 16px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .bottombar .best{font-size:12px; color:var(--sub);}
+  .bottombar .best b{display:block; color:var(--ink); font-size:15px;}
+  .buy-btn{
+    background:var(--green); color:#fff; border:none; border-radius:12px;
+    padding:12px 20px; font-weight:800; font-size:13px;
+  }
+  .note{
+    max-width:420px; margin:0 auto 40px; font-size:12px; color:var(--sub);
+    text-align:center; padding:0 20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="phone">
+  <header>
+    <div class="brand">
+      <div class="logo">S</div>
+      <div>
+        <div class="brand-name">Shary</div>
+        <div class="brand-sub">Shop Smarter</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <div class="icon-btn">🌐</div>
+      <div class="icon-btn">🔔</div>
+    </div>
+  </header>
+
+  <div class="hero">
+    <h1>Shop Smarter. Every Time.</h1>
+    <p>اكتب اسم أي منتج، وشاري هيدورلك على أرخص سعر حقيقي.</p>
+    <div class="search">
+      <span>🔍</span>
+      <input placeholder="Ask Shary... مثلاً iPhone 16" />
+    </div>
+  </div>
+
+  <div class="cats">
+    <div class="cat">📱 Phones</div>
+    <div class="cat">💻 Laptops</div>
+    <div class="cat">🎧 Audio</div>
+    <div class="cat">🏠 Home</div>
+    <div class="cat">👟 Fashion</div>
+  </div>
+
+  <div class="section-title">Today's Smart Picks <span class="link">See all</span></div>
+  <div class="card">
+    <div class="thumb">📱<span class="badge">86</span></div>
+    <div style="flex:1;">
+      <p class="prod-name">iPhone 16 128GB</p>
+      <p class="prod-meta">أرخص متجر: Amazon.eg</p>
+      <div class="price-row">
+        <span class="price">36,999 ج.م</span>
+        <span class="old-price">39,500</span>
+        <span class="discount">-6%</span>
+      </div>
+      <div class="cheapest-tag">✓ أقل سعر في آخر 3 شهور</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="thumb">🎧<span class="badge">72</span></div>
+    <div style="flex:1;">
+      <p class="prod-name">Sony WH-1000XM5</p>
+      <p class="prod-meta">أرخص متجر: Noon</p>
+      <div class="price-row">
+        <span class="price">10,250 ج.م</span>
+        <span class="old-price">11,800</span>
+        <span class="discount">-13%</span>
+      </div>
+      <div class="cheapest-tag" style="color:#B9822C;">↗ السعر أعلى من متوسط 90 يوم</div>
+    </div>
+  </div>
+
+  <div class="section-title">Full Analysis — iPhone 16</div>
+  <div class="analysis">
+    <div class="analysis-head">
+      <div class="score">86/100</div>
+      <div class="verdict">✅ BUY NOW</div>
+    </div>
+    <ul class="why">
+      <li>• أقل سعر في آخر 4 شهور</li>
+      <li>• 9% أقل من متوسط الـ 90 يوم</li>
+      <li>• الأرخص بين 4 متاجر تم فحصها</li>
+    </ul>
+    <div class="stores">
+      <div class="store cheapest">
+        <div class="name">Amazon.eg</div>
+        <div class="p">36,999</div>
+        <div class="stock">● In Stock · 5m ago</div>
+      </div>
+      <div class="store">
+        <div class="name">Noon</div>
+        <div class="p">37,450</div>
+        <div class="stock">● In Stock · 15m ago</div>
+      </div>
+      <div class="store">
+        <div class="name">Jumia</div>
+        <div class="p">38,100</div>
+        <div class="stock">● In Stock · 1h ago</div>
+      </div>
+      <div class="store">
+        <div class="name">B.TECH</div>
+        <div class="p">38,750</div>
+        <div class="stock" style="color:#EF4444;">● Out of Stock</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottombar">
+    <div class="best">أفضل سعر<b>36,999 ج.م</b></div>
+    <button class="buy-btn">Visit Store →</button>
+  </div>
+</div>
+
+<p class="note">
+  ده بريفيو تصميمي ثابت (مش الأبليكيشن الحقيقي) بيوضح شكل الألوان/اللوجو الجديد + إزاي ممكن تبان شاشة الهوم و"Full Analysis" بعد التطبيق الكامل للتصميم — لسه محتاج مراجعتك مقابل الموك-أب الأصلي.
+</p>
+
+</body>
+</html>

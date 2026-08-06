@@ -18,7 +18,7 @@ import {
 // The banner never appears if the app is already installed/standalone, and
 // remembers a dismissal (or an install) in localStorage so it doesn't nag.
 
-const DISMISS_KEY = "qarari-install-dismissed-at";
+const DISMISS_KEY = "shary-install-dismissed-at";
 const AUTO_HIDE_MS = 30_000;
 const RESHOW_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const APPEAR_DELAY_MS = 2_500;
@@ -113,13 +113,13 @@ export function InstallBanner() {
         closing ? "translate-y-4 opacity-0" : "translate-y-0 opacity-100"
       }`}
     >
-      <div className="flex items-start gap-3 rounded-2xl border border-amber-500/25 bg-zinc-900/95 p-3.5 shadow-2xl shadow-amber-500/10 backdrop-blur-md">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-lg shadow-amber-500/20">
-          <Sparkles className="h-5 w-5 text-[#0B0B0F]" />
+      <div className="flex items-start gap-3 rounded-2xl border border-shary/25 bg-white/95 p-3.5 shadow-2xl shadow-shary/10 backdrop-blur-md">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-shary to-shary-dark shadow-lg shadow-shary/20">
+          <Sparkles className="h-5 w-5 text-[#FFFFFF]" />
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-zinc-100">
+          <p className="text-sm font-semibold text-zinc-900">
             {t(deferredPrompt ? "installTitle" : "installIosTitle")}
           </p>
 
@@ -129,13 +129,13 @@ export function InstallBanner() {
               <div className="mt-2.5 flex items-center gap-2">
                 <button
                   onClick={handleInstall}
-                  className="rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 px-3.5 py-1.5 text-xs font-bold text-[#0B0B0F] shadow-md shadow-amber-500/20 transition-transform active:scale-95"
+                  className="rounded-lg bg-gradient-to-br from-shary to-shary-dark px-3.5 py-1.5 text-xs font-bold text-[#FFFFFF] shadow-md shadow-shary/20 transition-transform active:scale-95"
                 >
                   {t("installBtn")}
                 </button>
                 <button
                   onClick={dismiss}
-                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200"
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-800"
                 >
                   {t("installDismiss")}
                 </button>
@@ -146,7 +146,7 @@ export function InstallBanner() {
               <p className="mt-0.5 text-xs text-zinc-400">{t("installSubtitle")}</p>
               <p className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-zinc-400">
                 <span>{t("installIosStep1")}</span>
-                <Share className="h-3.5 w-3.5 text-amber-400" />
+                <Share className="h-3.5 w-3.5 text-shary-dark" />
                 <span>{t("installIosStep2")}</span>
               </p>
             </>
@@ -156,7 +156,7 @@ export function InstallBanner() {
         <button
           onClick={dismiss}
           aria-label="close"
-          className="shrink-0 rounded-lg p-1 text-zinc-500 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
+          className="shrink-0 rounded-lg p-1 text-zinc-500 transition-colors hover:bg-zinc-50/60 hover:text-zinc-800"
         >
           <X className="h-4 w-4" />
         </button>
