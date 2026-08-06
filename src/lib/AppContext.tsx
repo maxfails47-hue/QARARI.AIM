@@ -22,7 +22,6 @@ interface AppContextType {
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: string | null; needsConfirmation: boolean; alreadyRegistered: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  isPremium: boolean;
   showToast: (msg: string) => void;
   toast: string | null;
   pendingAction: (() => void) | null;
@@ -125,14 +124,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       country: data.country || "",
       phone: data.phone || "",
       interests: data.interests || [],
-      tier: data.tier,
-      currentPlanName: data.current_plan_name,
-      chatMessagesLimit: data.chat_messages_limit,
-      chatMessagesUsed: data.chat_messages_used,
-      priceAlertsLimit: data.price_alerts_limit,
-      priceAlertsUsed: data.price_alerts_used,
-      canExportPdf: data.can_export_pdf,
-      subscriptionEndDate: data.subscription_end_date ? new Date(data.subscription_end_date).getTime() : null,
       referralCode: data.referral_code || "",
       inviteCount: data.invite_count || 0,
     });
@@ -246,7 +237,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // `history` here only surfaces rows saved before that pivot, purely so
   // HistoryScreen can still total up past `moneySaved` for the "total
   // savings" stat.
-  const isPremium = user?.tier === "premium";
 
   return (
     <AppContext.Provider value={{
@@ -254,7 +244,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       history, refreshHistory,
       user, session, authLoading,
       signUp, signIn, signOut,
-      isPremium,
       showToast, toast,
       pendingAction, setPendingAction,
       requireAuth,

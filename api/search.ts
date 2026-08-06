@@ -6,13 +6,13 @@
 // each one for real and reads the live price/stock (_priceResolver.ts —
 // new), then returns them sorted cheapest-first.
 //
-// NOT included yet (see the Shary master spec, phases 3-4 — need
-// price_history table + tracked-product cron before these can be real
-// instead of fabricated):
-//   - "Lowest Ever / Average (90d) / Highest Ever"
-//   - The full BUY NOW / WAIT score (that needs the historical signal —
-//     today this only has the instant cross-store comparison signal)
-//   - "Why this decision?" template bullets that reference history
+// Phase 3: "Lowest Ever / Average (90d) / Highest Ever" and a real
+// BUY NOW / WAIT verdict now come from api/_priceHistory.ts, computed from
+// real rows in the price_history table (populated by this endpoint on every
+// search, plus the daily cron re-checking known products). Both the numbers
+// and the verdict are plain arithmetic — never fabricated. They only appear
+// once a product has price_history.MIN_HISTORY_DAYS of real data; before
+// that this still returns the honest "gathering data" note it always did.
 //
 // What IS real today: every price/stock value below was read from the
 // store's own live page moments ago — see `source` on each entry
@@ -32,6 +32,8 @@ import {
 } from "./_groq_tavily.js";
 import { resolvePricesForLinks } from "./_priceResolver.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep } from "./_logger.js";
+import { getSupabaseAdmin } from "./_supabaseAdmin.js";
+import { recordPriceSnapshots, getPriceStats, buildVerdict, generateVerdictReasoning } from "./_priceHistory.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const startedAt = Date.now();
@@ -70,6 +72,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sorted = [...withPrice].sort((a, b) => (a.price as number) - (b.price as number));
     const cheapest = sorted[0] || null;
 
+    // Product photo: whichever resolved store had a real og:image/JSON-LD
+    // image, preferring the cheapest store's if it has one. Never generated —
+    // null if no store page had a usable one.
+    const productImage =
+      (cheapest && resolved.find((r) => r.url === cheapest.url)?.imageUrl) ||
+      resolved.find((r) => r.imageUrl)?.imageUrl ||
+      null;
+
+    // Instant analysis: purely the spread between today's cheapest and
+    // priciest real price. Deterministic arithmetic, no AI, no history
+    // needed — so it's always available from the very first search, unlike
+    // the historical `decision` below which needs several days of data.
+    const instantAnalysis = (() => {
+      if (withPrice.length < 2) return null;
+      const prices = withPrice.map((r) => r.price as number);
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+      const spreadPct = min > 0 ? Math.round(((max - min) / min) * 100) : 0;
+      const message =
+        language === "ar"
+          ? spreadPct >= 10
+            ? `فيه فرق ${spreadPct}% بين أرخص وأغلى سعر بين المتاجر — يستاهل تاخد الأرخص`
+            : `الفرق بين المتاجر بسيط (${spreadPct}%) — مفيش داعي تقلق بين الاختيارات`
+          : spreadPct >= 10
+            ? `There's a ${spreadPct}% gap between the cheapest and priciest store — worth taking the cheaper one`
+            : `Prices are close across stores (${spreadPct}% gap) — no major difference between options`;
+      return { spreadPct, message };
+    })();
+
     const stores = resolved
       .map((r) => ({ ...r, isCheapest: cheapest ? r.url === cheapest.url : false }))
       // cheapest-first, then everything else (including unresolved, shown last)
@@ -80,6 +111,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return a.price - b.price;
       });
 
+    // Best-effort: snapshot what we just read live into price_history, and
+    // pull real history for this product+currency. Never blocks or fails
+    // the response — a history hiccup shouldn't break the live comparison
+    // the user actually asked for.
+    let priceHistory: { lowestEver: number; average90d: number; highestEver: number } | null = null;
+    let decision: { verdict: "BUY_NOW" | "WAIT"; score: number; reasons: string[] } | null = null;
+    let savingsVsAverage: number | null = null;
+    try {
+      const admin = getSupabaseAdmin();
+      logStep("record price snapshot");
+      await recordPriceSnapshots(admin, searchProduct, currency, resolved);
+
+      logStep("read price history");
+      const stats = await getPriceStats(admin, searchProduct, currency);
+      if (stats?.hasEnoughData && cheapest) {
+        priceHistory = {
+          lowestEver: stats.lowestEver,
+          average90d: Math.round(stats.average90d),
+          highestEver: stats.highestEver,
+        };
+        const verdict = buildVerdict(cheapest.price as number, stats);
+        const reasons = await generateVerdictReasoning(
+          searchProduct,
+          currency,
+          cheapest.price as number,
+          stats,
+          verdict
+        );
+        decision = { verdict: verdict.verdict, score: verdict.score, reasons };
+        // Only surface a "you save" figure when the current price is
+        // genuinely below the real 90-day average — never show a fake/zero saving.
+        const diff = Math.round(stats.average90d - (cheapest.price as number));
+        savingsVsAverage = diff > 0 ? diff : null;
+      }
+    } catch (e: any) {
+      console.error("[search] price history step failed (non-fatal):", e?.message);
+    }
+
     logRequestSuccess(startedAt);
     res.status(200).json({
       product: searchProduct,
@@ -89,12 +158,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cheapest,
       storesChecked: resolved.length,
       storesResolved: withPrice.length,
-      // Phase 3/4 will add: priceHistory { lowestEver, average90d, highestEver },
-      // decision { verdict: "BUY_NOW" | "WAIT", score, reasons[] }
-      note:
-        language === "ar"
-          ? "مقارنة لحظية بين المتاجر بس دلوقتي — تاريخ الأسعار (أقل سعر في آخر كذا شهر) لسه هيتضاف."
-          : "Instant cross-store comparison only for now — price history (lowest in N months) is coming next.",
+      productImage,
+      instantAnalysis,
+      priceHistory,
+      decision,
+      savingsVsAverage,
+      note: priceHistory
+        ? null
+        : language === "ar"
+          ? "مقارنة لحظية بين المتاجر بس دلوقتي — تاريخ الأسعار (أقل سعر في آخر كذا شهر) لسه بيتجمّع لحد ما يبقى عندنا بيانات كافية."
+          : "Instant cross-store comparison only for now — price history is still being gathered for this product.",
     });
   } catch (err) {
     logUnhandledError(err, startedAt);

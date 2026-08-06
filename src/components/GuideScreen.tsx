@@ -1,5 +1,5 @@
 import { useApp } from "@/lib/AppContext";
-import { ChevronLeft, Zap, TrendingUp, Crown, Check } from "lucide-react";
+import { ChevronLeft, Zap, TrendingUp, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function GuideScreen() {
@@ -25,8 +25,8 @@ export function GuideScreen() {
       descEn: "Ask the advisor anything about shopping and get personalized advice",
     },
     {
-      titleAr: "💬 150 رسالة شهريًا (بريميوم)",
-      titleEn: "💬 150 Messages/Month (Premium)",
+      titleAr: "💬 دردشة مع المساعد",
+      titleEn: "💬 Chat with the Advisor",
       descAr: "تحدث مع المساعد وهو يتذكر اهتماماتك",
       descEn: "Chat with the advisor who remembers your interests",
     },
@@ -72,8 +72,8 @@ export function GuideScreen() {
         </p>
         <p className="mt-2 text-sm text-zinc-700">
           {lang === "ar"
-            ? "والاشتراك البريميوم بـ 150 جنيه فقط يوفر لك أكثر من ذلك بكتير"
-            : "And premium subscription at just 150 EGP saves you much more"}
+            ? "وشاري مجاني بالكامل من غير أي حدود"
+            : "And Shary is completely free, with no limits"}
         </p>
       </div>
 
@@ -92,25 +92,6 @@ export function GuideScreen() {
             </p>
           </div>
         ))}
-      </div>
-
-      {/* Premium Benefits */}
-      <div className="mb-8 rounded-2xl border border-shary/20 bg-gradient-to-b from-shary/5 to-transparent p-6 text-center">
-        <Crown className="mx-auto mb-3 h-8 w-8 text-shary-dark" />
-        <h2 className="text-xl font-bold text-shary-dark">
-          {lang === "ar" ? "افتح كل إمكانيات شاري" : "Unlock the full power of Shary"}
-        </h2>
-        <p className="mt-2 text-sm text-zinc-400">
-          {lang === "ar"
-            ? "تحليلات ومقارنات ورسائل أكتر مع المساعد الذكي، وذاكرة تتذكر اهتماماتك"
-            : "More analyses, comparisons, and advisor messages — plus smart memory that remembers your interests"}
-        </p>
-        <Button
-          onClick={() => navigate("upgrade")}
-          className="mt-5 w-full bg-gradient-to-r from-shary to-shary-dark text-[#FFFFFF] font-bold hover:from-shary hover:to-shary-dark"
-        >
-          {lang === "ar" ? "👑 اشترك الآن" : "👑 Subscribe Now"}
-        </Button>
       </div>
 
       {/* How It Works */}
@@ -165,13 +146,6 @@ export function GuideScreen() {
           className="w-full bg-gradient-to-r from-shary to-shary-dark text-[#FFFFFF] font-bold hover:from-shary hover:to-shary-dark"
         >
           {lang === "ar" ? "🚀 ابدأ الآن" : "🚀 Start Now"}
-        </Button>
-        <Button
-          onClick={() => navigate("upgrade")}
-          variant="outline"
-          className="w-full border-shary/30 text-shary-dark hover:bg-shary/10"
-        >
-          {lang === "ar" ? "👑 اشترك بريميوم" : "👑 Subscribe Premium"}
         </Button>
       </div>
     </div>

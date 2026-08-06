@@ -1,35 +1,15 @@
 import { useEffect, useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { currencies, FREE_MONTHLY_LIMIT, SUPPORT_WHATSAPP } from "@/lib/types";
+import { SUPPORT_WHATSAPP } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   User, Mail, Phone, MapPin, LogOut, Share2, CheckCircle2,
-  Crown, Zap, MessageCircle, ChevronLeft, Copy, Sparkles
+  MessageCircle, ChevronLeft, Copy, Sparkles
 } from "lucide-react";
 
 export function ProfileScreen() {
-  const { t, lang, dir, user, signOut, navigate, isPremium, session, authLoading, replayOnboarding } = useApp();
-  const [scansUsed, setScansUsed] = useState(0);
-  const [scansMax, setScansMax] = useState(FREE_MONTHLY_LIMIT);
+  const { t, lang, dir, user, signOut, navigate, session, authLoading, replayOnboarding } = useApp();
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    async function fetchUsage() {
-      if (!session?.access_token) return;
-      try {
-        const res = await fetch("/api/user?action=scans-remaining", { headers: { Authorization: `Bearer ${session.access_token}` } });
-        const data = await res.json();
-        if (!data.unlimited && typeof data.remaining === "number") {
-          const max = typeof data.max === "number" ? data.max : FREE_MONTHLY_LIMIT;
-          setScansUsed(Math.max(0, max - data.remaining));
-          setScansMax(max);
-        }
-      } catch {
-        // non-critical display value; ignore failures silently here
-      }
-    }
-    fetchUsage();
-  }, [session, isPremium]);
 
   // Redirect to login only once we actually KNOW there's no session — never
   // during the brief moment right after login where `session` is already
@@ -71,10 +51,6 @@ export function ProfileScreen() {
   const shareUrl = encodeURIComponent("https://shary-aim.vercel.app");
   const shareText = encodeURIComponent(lang === "ar" ? "ساعدني في توفير فلوسي بقرارات شراء ذكية مع Shary!" : "Help me save money with smart purchase decisions using Shary!");
 
-  const subEndDate = user.subscriptionEndDate
-    ? new Date(user.subscriptionEndDate).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-US", { year: "numeric", month: "long", day: "numeric" })
-    : null;
-
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 pb-24">
       <div className="mb-6 flex items-center gap-3">
@@ -98,26 +74,8 @@ export function ProfileScreen() {
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-zinc-900">{user.name}</h2>
-              {isPremium && (
-                <span className="flex items-center gap-1 rounded-full bg-gradient-to-r from-shary/20 to-shary-dark/20 px-2 py-0.5 text-xs font-bold text-shary-dark ring-1 ring-shary/30">
-                  <Crown className="h-3 w-3" /> {user.currentPlanName ? user.currentPlanName.replace('_', ' ').toUpperCase() : t("premium")}
-                </span>
-              )}
             </div>
             <p className="text-sm text-zinc-500">{user.email}</p>
-            {isPremium && subEndDate ? (
-              <p className="mt-1 text-xs text-shary-dark/80">
-                {t("premiumActive")} {subEndDate}
-              </p>
-            ) : isPremium ? (
-              <p className="mt-1 text-xs text-shary-dark/80">
-                {lang === "ar" ? "باقة دائمة نشطة" : "Lifetime plan active"}
-              </p>
-            ) : (
-              <p className="mt-1 text-xs text-zinc-500">
-                {t("freePlanStatus", { used: scansUsed, max: scansMax })}
-              </p>
-            )}
           </div>
         </div>
       </div>
@@ -221,17 +179,6 @@ export function ProfileScreen() {
           </div>
         )}
       </div>
-
-      {/* Upgrade CTA (if free) */}
-      {!isPremium && (
-        <div className="mb-6 rounded-2xl border border-shary/30 bg-gradient-to-b from-shary/10 to-transparent p-6 text-center">
-          <Crown className="mx-auto mb-2 h-8 w-8 text-shary-dark" />
-          <h3 className="text-lg font-bold text-shary-dark">{t("premium")}</h3>
-          <Button onClick={() => navigate("upgrade")} className="mt-4 bg-gradient-to-r from-shary to-shary-dark text-[#FFFFFF] hover:from-shary hover:to-shary-dark">
-            <Zap className="h-4 w-4" /> {t("subscribeNow")}
-          </Button>
-        </div>
-      )}
 
       {/* Support Contact */}
       <div className="mb-6 rounded-xl border border-zinc-200 bg-white/60 p-5">

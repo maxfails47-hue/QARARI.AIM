@@ -6,7 +6,6 @@ import { DecisionInput } from "@/components/DecisionInput";
 import { HistoryScreen } from "@/components/HistoryScreen";
 import { ProfileScreen } from "@/components/ProfileScreen";
 import { LoginScreen } from "@/components/LoginScreen";
-import { UpgradeScreen } from "@/components/UpgradeScreen";
 import { GuideScreen } from "@/components/GuideScreen";
 import { AdvisorScreen } from "@/components/AdvisorScreen";
 import { WatchlistScreen } from "@/components/WatchlistScreen";
@@ -27,8 +26,6 @@ function ScreenRouter() {
       return <ProfileScreen />;
     case "login":
       return <LoginScreen />;
-    case "upgrade":
-      return <UpgradeScreen />;
     case "guide":
       return <GuideScreen />;
     case "advisor":
@@ -46,7 +43,7 @@ function ScreenRouter() {
 // auth/upgrade flows where it would just be noise.
 function HelpFab() {
   const { screen, helpSheetOpen, replayOnboarding, t } = useApp();
-  if (screen === "login" || screen === "upgrade") return null;
+  if (screen === "login") return null;
   return (
     <button
       // Replays the full 6-slide onboarding (Section 1) — this is now the

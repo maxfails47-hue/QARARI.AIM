@@ -1,5 +1,5 @@
 export type Language = "ar" | "en";
-export type Screen = "input" | "history" | "profile" | "login" | "upgrade" | "guide" | "advisor" | "watchlist";
+export type Screen = "input" | "history" | "profile" | "login" | "guide" | "advisor" | "watchlist";
 
 export interface Currency {
   code: string;
@@ -18,9 +18,6 @@ export const currencies: Currency[] = [
   { code: "KWD", enName: "Kuwaiti Dinar", arName: "دينار كويتي", enShort: "KWD", arShort: "دينار" },
 ];
 
-export const FREE_MONTHLY_LIMIT = 3; // matches FREE_TIER_LIMITS.scans in api/_planConfig.ts — used only as initial UI fallback before the real value loads from the server
-export const MONTHLY_PRICE = 150;
-export const INSTAPAY_NUMBER = "01025204455";
 export const SUPPORT_WHATSAPP = "201143494418";
 
 export interface BilingualText {
@@ -94,14 +91,6 @@ export interface UserProfile {
   country: string;
   phone: string;
   interests: string[];
-  tier: "free" | "premium";
-  currentPlanName?: string;
-  chatMessagesLimit?: number;
-  chatMessagesUsed?: number;
-  priceAlertsLimit?: number;
-  priceAlertsUsed?: number;
-  canExportPdf?: boolean;
-  subscriptionEndDate: number | null;
   referralCode: string;
   inviteCount: number;
 }

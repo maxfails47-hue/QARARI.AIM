@@ -1,7 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabaseAdmin } from "../_supabaseAdmin.js";
 import { sendEmail } from "../_resend.js";
-import { getFairPriceRange } from "../_groq_tavily.js";
+import { getFairPriceRange, fetchMainProductRetailerLinks } from "../_groq_tavily.js";
+import { resolvePricesForLinks } from "../_priceResolver.js";
+import { recordPriceSnapshots } from "../_priceHistory.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep } from "../_logger.js";
 
 // Verifies this request really came from Vercel Cron. Vercel automatically
@@ -14,71 +16,7 @@ function isValidCronRequest(req: VercelRequest): boolean {
   return auth === `Bearer ${secret}`;
 }
 
-// ---- 2. Proactively reset monthly free-scan counters (Section 14) ----
-async function resetMonthlyScans(admin: any) {
-  const now = new Date();
-  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-
-  const { data: usersToReset } = await admin
-    .from("users")
-    .select("id, email, full_name")
-    .eq("tier", "free")
-    .lt("scans_reset_at", startOfMonth)
-    .gt("scans_used_this_month", 0);
-
-  if (usersToReset?.length) {
-    const ids = usersToReset.map((u: any) => u.id);
-    await admin.from("users").update({ scans_used_this_month: 0, scans_reset_at: now.toISOString() }).in("id", ids);
-
-    // Nudge them back into the app now that their free monthly quota renewed.
-    // Capped per run so a single cron invocation can't fire an email storm.
-    const toEmail = usersToReset.filter((u: any) => u.email).slice(0, 200);
-    for (const u of toEmail) {
-      const name = u.full_name ? u.full_name.split(" ")[0] : "";
-      try {
-        await sendEmail(
-          u.email,
-          "تحليلاتك المجانية رجعت! 🎉 — Shary",
-          `<p>أهلاً ${name}،</p>
-           <p>تحليلاتك الثلاثة المجانية على شاري رجعت تاني الشهر ده. ارجع افتح التطبيق وقارن سعر أي حاجة بتفكر تشتريها قبل ما تدفع فلوسك.</p>
-           <p>Hi ${name}, your 3 free analyses on Shary just renewed for this month. Come back and check the fair price on your next purchase before you pay.</p>`
-        );
-      } catch (e: any) {
-        console.error("[cron] Failed to send scans-reset nudge email to", u.email, ":", e?.message || e);
-      }
-    }
-  }
-
-  // Reset IP-based guest usage (legacy)
-  const { data: guestsToReset } = await admin
-    .from("guest_usage")
-    .select("ip_address")
-    .lt("scans_reset_at", startOfMonth)
-    .gt("scans_used_this_month", 0);
-
-  if (guestsToReset?.length) {
-    const ips = guestsToReset.map((g: any) => g.ip_address);
-    await admin.from("guest_usage").update({ scans_used_this_month: 0, scans_reset_at: now.toISOString() }).in("ip_address", ips);
-  }
-
-  // Reset Device Fingerprint-based guest usage (primary)
-  const { data: deviceLogsToReset } = await admin
-    .from("device_usage_logs")
-    .select("id, device_fingerprint")
-    .lt("scans_reset_at", startOfMonth)
-    .gt("scans_used_this_month", 0);
-
-  let devicesReset = 0;
-  if (deviceLogsToReset?.length) {
-    const logIds = deviceLogsToReset.map((l: any) => l.id);
-    await admin.from("device_usage_logs").update({ scans_used_this_month: 0, scans_reset_at: now.toISOString() }).in("id", logIds);
-    devicesReset = deviceLogsToReset.length;
-  }
-
-  return { usersReset: usersToReset?.length || 0, guestsReset: guestsToReset?.length || 0, devicesReset };
-}
-
-// ---- 3. Real price-drop checking for the watchlist (Section 18) ----
+// ---- Real price-drop checking for the watchlist (Section 18) ----
 async function checkWatchlistPriceDrops(admin: any) {
   const { data: rows, error } = await admin
     .from("watchlist")
@@ -134,24 +72,51 @@ async function checkWatchlistPriceDrops(admin: any) {
   return { checked: batch.length, notified };
 }
 
-// ---- 2b. Proactively reset monthly compare counters (Section 15's 10/month cap) ----
-async function resetMonthlyCompares(admin: any) {
-  const now = new Date();
-  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+// ---- Keep price_history growing for known products even when nobody
+// re-searches them (Phase 3 foundation for real BUY NOW / WAIT verdicts —
+// see api/_priceHistory.ts). Re-runs the exact same live discover+resolve
+// pipeline /api/search uses, just triggered by the schedule instead of a
+// user request, then snapshots the result the same way. ----
+async function refreshPriceHistory(admin: any) {
+  // Distinct product_key+currency pairs seen recently. Capped window so this
+  // doesn't scan the whole table as it grows.
+  const { data: recentRows, error } = await admin
+    .from("price_history")
+    .select("product_key, currency")
+    .order("checked_at", { ascending: false })
+    .limit(500);
 
-  const { data: usersToReset } = await admin
-    .from("users")
-    .select("id")
-    .eq("tier", "free")
-    .lt("compares_reset_at", startOfMonth)
-    .gt("compares_used_this_month", 0);
+  if (error || !recentRows?.length) return { checked: 0, snapshotted: 0 };
 
-  if (usersToReset?.length) {
-    const ids = usersToReset.map((u: any) => u.id);
-    await admin.from("users").update({ compares_used_this_month: 0, compares_reset_at: now.toISOString() }).in("id", ids);
+  const seen = new Set<string>();
+  const pairs: { product_key: string; currency: string }[] = [];
+  for (const row of recentRows) {
+    const key = `${row.product_key}::${row.currency}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      pairs.push(row);
+    }
   }
 
-  return { usersReset: usersToReset?.length || 0 };
+  // Same per-run cap philosophy as checkWatchlistPriceDrops — this hits
+  // real retailer pages per product, so a single cron run can't run away.
+  const batch = pairs.slice(0, 25);
+  let snapshotted = 0;
+
+  for (const { product_key, currency } of batch) {
+    try {
+      const links = await fetchMainProductRetailerLinks(product_key, currency, "new");
+      if (!links.length) continue;
+      const resolved = await resolvePricesForLinks(links, currency);
+      await recordPriceSnapshots(admin, product_key, currency, resolved);
+      snapshotted++;
+    } catch (e: any) {
+      console.error(`[cron] price history refresh failed for "${product_key}" (${currency}):`);
+      console.error(e);
+    }
+  }
+
+  return { checked: batch.length, snapshotted };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -167,34 +132,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const admin = getSupabaseAdmin();
     const summary: Record<string, unknown> = {};
 
-    // NOTE: subscription expiry-by-date was removed — plans here are purely
-    // quota-based (scans/compares/chat messages), with no calendar expiry.
-    // A prior "revertExpiredSubscriptions" step used to run here, but
-    // subscription_end_date is never set to a real date anywhere in the
-    // app (approve.ts always writes null), so it could never match a row
-    // and had silently done nothing since it was added.
-    logStep("resetMonthlyScans...");
-    try {
-      summary.scanResets = await resetMonthlyScans(admin);
-      console.log("[cron] resetMonthlyScans result:", summary.scanResets);
-    } catch (e: any) {
-      console.error("[cron] resetMonthlyScans failed:");
-      console.error(e);
-      console.error(e?.stack);
-      summary.scanResets = { error: String(e) };
-    }
-
-    logStep("resetMonthlyCompares...");
-    try {
-      summary.compareResets = await resetMonthlyCompares(admin);
-      console.log("[cron] resetMonthlyCompares result:", summary.compareResets);
-    } catch (e: any) {
-      console.error("[cron] resetMonthlyCompares failed:");
-      console.error(e);
-      console.error(e?.stack);
-      summary.compareResets = { error: String(e) };
-    }
-
+    // NOTE: the old scans/compares monthly quota reset jobs were removed
+    // along with the subscription system — Shary's /api/search is
+    // unmetered now, so there's no monthly counter left to reset.
     logStep("checkWatchlistPriceDrops...");
     try {
       summary.watchlist = await checkWatchlistPriceDrops(admin);
@@ -204,6 +144,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error(e);
       console.error(e?.stack);
       summary.watchlist = { error: String(e) };
+    }
+
+    logStep("refreshPriceHistory...");
+    try {
+      summary.priceHistory = await refreshPriceHistory(admin);
+      console.log("[cron] refreshPriceHistory result:", summary.priceHistory);
+    } catch (e: any) {
+      console.error("[cron] refreshPriceHistory failed:");
+      console.error(e);
+      console.error(e?.stack);
+      summary.priceHistory = { error: String(e) };
     }
 
     console.log("Saving database...");

@@ -35,6 +35,7 @@ export interface ResolvedStorePrice {
   price: number | null;
   currency: string;
   inStock: boolean | null; // null = couldn't determine
+  imageUrl: string | null; // product photo, when the page's own JSON-LD/meta has one — never AI-generated
   lastChecked: string; // ISO timestamp
   source: "jsonld" | "meta" | "ai" | "unresolved";
 }
@@ -123,6 +124,65 @@ function extractFromMeta(html: string): { price: number | null; inStock: boolean
   return null;
 }
 
+// ─── Product image (independent of which price path resolves) ───
+function imageFromJsonLdNode(node: any): string | null {
+  const raw = node?.image;
+  if (!raw) return null;
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) {
+    const first = raw.find((v: any) => typeof v === "string" || typeof v?.url === "string");
+    if (typeof first === "string") return first;
+    if (typeof first?.url === "string") return first.url;
+    return null;
+  }
+  if (typeof raw?.url === "string") return raw.url;
+  return null;
+}
+
+function extractImage(html: string, pageUrl: string): string | null {
+  let candidate: string | null = null;
+
+  const blocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const block of blocks) {
+    try {
+      const parsed = JSON.parse(block[1].trim());
+      const nodes = Array.isArray(parsed) ? parsed : [parsed];
+      for (const node of flattenGraph(nodes)) {
+        const img = imageFromJsonLdNode(node) || imageFromJsonLdNode(node?.offers);
+        if (img) {
+          candidate = img;
+          break;
+        }
+      }
+    } catch {
+      // malformed JSON-LD block — skip it
+    }
+    if (candidate) break;
+  }
+
+  if (!candidate) {
+    const metaPatterns = [
+      /<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["']/i,
+    ];
+    for (const re of metaPatterns) {
+      const m = html.match(re);
+      if (m) {
+        candidate = m[1];
+        break;
+      }
+    }
+  }
+
+  if (!candidate) return null;
+
+  try {
+    return new URL(candidate, pageUrl).toString();
+  } catch {
+    return null; // malformed/relative URL we couldn't resolve — never guess
+  }
+}
+
 // ─── 3. AI fallback — only reached when 1 and 2 both miss ───
 const PRICE_SCHEMA = {
   type: "object",
@@ -169,19 +229,23 @@ async function resolveOne(link: RetailerLink, currency: string): Promise<Resolve
 
   const html = await fetchHtml(link.url);
   if (!html) {
-    return { ...base, price: null, inStock: null, source: "unresolved" };
+    return { ...base, price: null, inStock: null, imageUrl: null, source: "unresolved" };
   }
 
+  // Image extraction is independent of which price path below succeeds —
+  // a store can have a clean og:image even if its price needs the AI fallback.
+  const imageUrl = extractImage(html, link.url);
+
   const jsonld = extractFromJsonLd(html);
-  if (jsonld) return { ...base, price: jsonld.price, inStock: jsonld.inStock, source: "jsonld" };
+  if (jsonld) return { ...base, price: jsonld.price, inStock: jsonld.inStock, imageUrl, source: "jsonld" };
 
   const meta = extractFromMeta(html);
-  if (meta) return { ...base, price: meta.price, inStock: meta.inStock, source: "meta" };
+  if (meta) return { ...base, price: meta.price, inStock: meta.inStock, imageUrl, source: "meta" };
 
   const ai = await extractViaAi(html, link.retailer, currency);
-  if (ai) return { ...base, price: ai.price, inStock: ai.inStock, source: "ai" };
+  if (ai) return { ...base, price: ai.price, inStock: ai.inStock, imageUrl, source: "ai" };
 
-  return { ...base, price: null, inStock: null, source: "unresolved" };
+  return { ...base, price: null, inStock: null, imageUrl, source: "unresolved" };
 }
 
 /**
@@ -204,6 +268,7 @@ export async function resolvePricesForLinks(
           price: null,
           currency,
           inStock: null,
+          imageUrl: null,
           lastChecked: new Date().toISOString(),
           source: "unresolved" as const,
         }

@@ -4,7 +4,7 @@ import { Globe, History, User, Plus, Bell, MoreVertical } from "lucide-react";
 import { HeaderInstallButton } from "@/components/HeaderInstallButton";
 
 export function Header() {
-  const { lang, setLang, t, navigate, screen, isPremium, user } = useApp();
+  const { lang, setLang, t, navigate, screen, user } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 

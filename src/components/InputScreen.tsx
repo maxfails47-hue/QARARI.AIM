@@ -4,17 +4,15 @@ import { getCategoryIcon, getIconByCategory } from "@/lib/categoryIcons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sparkles, Crown, Mic, Send, HelpCircle, X } from "lucide-react";
+import { Sparkles, Mic, Send, HelpCircle, X, ChevronDown, Check, Clock } from "lucide-react";
 import { getCachedFingerprint } from "@/lib/fingerprint";
 
 export function InputScreen() {
-  const { t, lang, navigate, isPremium, session, showToast, setHelpSheetOpen } = useApp();
+  const { t, lang, navigate, session, showToast, setHelpSheetOpen } = useApp();
   const [product, setProduct] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
-  const [remaining, setRemaining] = useState<number | null>(null);
-  const [maxScans, setMaxScans] = useState<number>(0);
 
   // Chat Assistant State — unrelated to the search form, left as-is.
   const [showChat, setShowChat] = useState(false);
@@ -199,33 +197,6 @@ export function InputScreen() {
 
   const Icon = aiCategory && aiCategory !== "other" ? getIconByCategory(aiCategory) : localIcon;
 
-  const quotaExceeded = remaining !== null && remaining <= 0;
-
-  useEffect(() => {
-    if (!session?.user && deviceFingerprint === null) return;
-    async function fetchRemaining() {
-      try {
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-        const body: Record<string, any> = {};
-        if (deviceFingerprint) {
-          body.deviceFingerprint = deviceFingerprint;
-        }
-        const res = await fetch("/api/user?action=scans-remaining", {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        setRemaining(data.unlimited ? null : data.remaining);
-        if (typeof data.max === "number") setMaxScans(data.max);
-      } catch {
-        setRemaining(null);
-      }
-    }
-    fetchRemaining();
-  }, [session, isPremium, deviceFingerprint]);
-
   useEffect(() => {
     async function fetchChatRemaining() {
       try {
@@ -239,16 +210,24 @@ export function InputScreen() {
       }
     }
     fetchChatRemaining();
-  }, [session, isPremium]);
+  }, [session]);
 
-  // Calls the new /api/search endpoint (Shary Phase 2): product name only,
-  // real per-store prices back. Not wired into the old scans quota system
-  // yet (see api/search.ts header) and not routed through the old
+  // Calls the /api/search endpoint: product name only, real per-store
+  // prices back. Unmetered — Shary's search is free, no quota system.
   // reveal/report screens — those were built around the old verdict shape.
   // Results render inline below until the real "Full Analysis" screen
   // (Phase 5) exists.
   const [searchResult, setSearchResult] = useState<any>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [whyOpen, setWhyOpen] = useState(false);
+
+  function timeAgo(iso: string, l: string): string {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (mins < 1) return l === "ar" ? "الآن" : "just now";
+    if (mins < 60) return l === "ar" ? `منذ ${mins} دقيقة` : `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    return l === "ar" ? `منذ ${hrs} ساعة` : `${hrs}h ago`;
+  }
 
   const handleSubmit = async () => {
     if (!product.trim()) {
@@ -258,6 +237,7 @@ export function InputScreen() {
     setLoading(true);
     setSearchError(null);
     setSearchResult(null);
+    setWhyOpen(false);
     try {
       const res = await fetch("/api/search", {
         method: "POST",
@@ -371,20 +351,9 @@ export function InputScreen() {
             )}
           </div>
 
-          {/* Scan Counter */}
-          <div className="text-center text-sm">
-            {remaining === null ? (
-              <span className="text-zinc-400">…</span>
-            ) : (
-              <span className={isPremium ? "font-bold text-shary-dark" : "text-zinc-500"}>
-                {t("scansLeft", { remaining, max: maxScans })}
-              </span>
-            )}
-          </div>
-
           {/* Submit */}
           <Button
-            onClick={quotaExceeded ? () => navigate("upgrade") : handleSubmit}
+            onClick={handleSubmit}
             disabled={loading}
             className="w-full bg-shary text-white font-bold hover:bg-shary-dark disabled:opacity-90"
           >
@@ -393,8 +362,6 @@ export function InputScreen() {
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                 <span key={loadingMessageIndex}>{loadingMessages[loadingMessageIndex]}</span>
               </span>
-            ) : quotaExceeded ? (
-              <><Crown className="h-4 w-4" /> {t("upgrade")}</>
             ) : (
               <><Sparkles className="h-4 w-4" /> {lang === "ar" ? "دوّر على أرخص سعر" : "Find the best price"}</>
             )}
@@ -423,21 +390,152 @@ export function InputScreen() {
               screen (Phase 5) exists. Every price/store here came back from
               /api/search a moment ago; see each card's tiny "•" source tag. */}
           {searchResult && !loading && (
-            <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-zinc-800">{searchResult.product}</p>
-                <span className="text-[10px] text-zinc-400">
-                  {searchResult.storesResolved}/{searchResult.storesChecked} {lang === "ar" ? "متاجر" : "stores"}
-                </span>
+            <div className="reveal-fade-rise space-y-3 rounded-2xl border border-zinc-200 bg-white p-4">
+              {/* Header: product photo + name (photo only if a real store page had one) */}
+              <div className="flex items-center gap-3">
+                {searchResult.productImage && (
+                  <img
+                    src={searchResult.productImage}
+                    alt={searchResult.product}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    className="h-16 w-16 shrink-0 rounded-xl border border-zinc-200 object-contain bg-white"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-zinc-800">{searchResult.product}</p>
+                  <span className="text-[10px] text-zinc-400">
+                    {searchResult.storesResolved}/{searchResult.storesChecked} {lang === "ar" ? "متاجر" : "stores"}
+                  </span>
+                </div>
               </div>
+
+              {/* Best price hero — every figure here is a real field from /api/search */}
+              {searchResult.cheapest && (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                  <div className="flex items-end justify-between">
+                    <div>
+                      <p className="text-[10px] font-medium text-zinc-400">
+                        {lang === "ar" ? "أفضل سعر" : "Best price"}
+                      </p>
+                      <p className="text-2xl font-extrabold text-zinc-900">
+                        {searchResult.cheapest.price.toLocaleString()}
+                        <span className="ms-1 text-sm font-semibold text-zinc-500">{searchResult.currency}</span>
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-shary px-2.5 py-1 text-[10px] font-bold text-white">
+                      {lang === "ar" ? "الأرخص" : "Cheapest price"}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-3 text-[11px] text-zinc-400">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {timeAgo(searchResult.cheapest.lastChecked, lang)}
+                    </span>
+                    {searchResult.savingsVsAverage && (
+                      <span className="font-semibold text-shary-dark">
+                        {lang === "ar"
+                          ? `وفّرت ${searchResult.savingsVsAverage.toLocaleString()} ${searchResult.currency}`
+                          : `You save ${searchResult.savingsVsAverage.toLocaleString()} ${searchResult.currency}`}
+                        {" "}
+                        {lang === "ar" ? "عن متوسط السعر" : "vs. average price"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Real BUY NOW / WAIT verdict — score circle + collapsible real
+                  reasons. Only rendered once price_history has enough real
+                  data (see api/_priceHistory.ts) — null/null until then, so
+                  nothing here is ever fabricated. */}
+              {searchResult.decision && searchResult.priceHistory && (
+                <div
+                  className={`reveal-fade-rise rounded-xl border p-3 ${
+                    searchResult.decision.verdict === "BUY_NOW"
+                      ? "value-banner border-shary bg-shary-light"
+                      : "border-amber-300 bg-amber-50"
+                  }`}
+                  style={{ animationDelay: "80ms" }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full"
+                      style={{
+                        background: `conic-gradient(${
+                          searchResult.decision.verdict === "BUY_NOW" ? "#00B884" : "#f59e0b"
+                        } ${searchResult.decision.score * 3.6}deg, #e4e4e7 0deg)`,
+                      }}
+                    >
+                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white">
+                        <span className="text-sm font-extrabold text-zinc-800">{searchResult.decision.score}</span>
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={`text-sm font-bold ${
+                          searchResult.decision.verdict === "BUY_NOW" ? "text-shary-dark" : "text-amber-700"
+                        }`}
+                      >
+                        {searchResult.decision.verdict === "BUY_NOW"
+                          ? lang === "ar" ? "وقت ممتاز للشراء" : "Great time to buy"
+                          : lang === "ar" ? "يفضل تستنى شوية" : "Better to wait"}
+                      </p>
+                      <p className="text-[11px] text-zinc-500">
+                        {lang === "ar" ? "أقل سعر مسجّل" : "Lowest ever"}: {searchResult.priceHistory.lowestEver.toLocaleString()}{" "}
+                        {searchResult.currency} · {lang === "ar" ? "متوسط 90 يوم" : "90d avg"}:{" "}
+                        {searchResult.priceHistory.average90d.toLocaleString()} {searchResult.currency}
+                      </p>
+                    </div>
+                  </div>
+
+                  {(searchResult.decision.reasons || []).length > 0 && (
+                    <div className="mt-2 border-t border-black/5 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setWhyOpen((v) => !v)}
+                        className="flex w-full items-center justify-between text-[11px] font-semibold text-zinc-600"
+                      >
+                        {lang === "ar" ? "ليه القرار ده؟" : "Why this decision?"}
+                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${whyOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {whyOpen && (
+                        <div className="mt-1.5 space-y-1">
+                          {searchResult.decision.reasons.map((r: string, i: number) => (
+                            <p key={i} className="flex items-start gap-1.5 text-[11px] text-zinc-600">
+                              <Check className="mt-0.5 h-3 w-3 shrink-0 text-shary-dark" />
+                              {r}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Instant analysis — real spread between today's cheapest/priciest
+                  price, no history needed so it's always available (unlike the
+                  historical verdict above). */}
+              {searchResult.instantAnalysis && (
+                <div className="value-banner reveal-fade-rise flex items-start gap-2 rounded-xl border border-shary/20 bg-shary-light p-3" style={{ animationDelay: "140ms" }}>
+                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-shary-dark" />
+                  <p className="text-[12px] leading-relaxed text-shary-dark">{searchResult.instantAnalysis.message}</p>
+                </div>
+              )}
+
+              {/* Store comparison */}
               <div className="space-y-2">
+                <p className="text-[11px] font-semibold text-zinc-500">
+                  {lang === "ar" ? "مقارنة المتاجر" : "Store comparison"}
+                </p>
                 {(searchResult.stores || []).map((s: any, i: number) => (
                   <a
                     key={i}
                     href={s.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className={`flex items-center justify-between rounded-xl border p-3 text-sm transition-colors ${
+                    style={{ animationDelay: `${i * 60}ms` }}
+                    className={`reveal-fade-rise flex items-center justify-between rounded-xl border p-3 text-sm transition-colors ${
                       s.isCheapest ? "border-shary bg-shary-light" : "border-zinc-200 bg-white hover:border-shary/40"
                     }`}
                   >

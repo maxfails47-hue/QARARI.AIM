@@ -3,7 +3,7 @@ import { useApp } from "@/lib/AppContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  MessageCircle, Send, Mic, ChevronLeft, Bot, Brain, Sparkles, X, Lock, Zap, ShieldCheck, TrendingUp
+  MessageCircle, Send, Mic, ChevronLeft, Bot, Brain, X, Lock, Zap, ShieldCheck, TrendingUp
 } from "lucide-react";
 
 interface ChatMessage {
@@ -12,7 +12,7 @@ interface ChatMessage {
 }
 
 export function AdvisorScreen() {
-  const { t, lang, dir, session, isPremium } = useApp();
+  const { t, lang, dir, session } = useApp();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -116,12 +116,6 @@ export function AdvisorScreen() {
             </div>
           </div>
         </div>
-        {isPremium && (
-          <div className="hidden sm:flex items-center gap-2 rounded-full bg-shary/10 px-3 py-1 border border-shary/20">
-            <Sparkles className="h-3 w-3 text-shary-dark" />
-            <span className="text-[10px] font-bold text-shary-dark uppercase">Premium Member</span>
-          </div>
-        )}
       </div>
 
       {/* Chat Area */}

@@ -38,7 +38,7 @@ const TOKEN_STOPWORDS = new Set([
   "new", "original", "international", "version", "edition",
 ]);
 
-function getSignificantTokens(productName: string): string[] {
+export function getSignificantTokens(productName: string): string[] {
   return Array.from(
     new Set(
       (productName || "")
@@ -49,7 +49,7 @@ function getSignificantTokens(productName: string): string[] {
   );
 }
 
-function matchesProduct(haystack: string, tokens: string[]): boolean {
+export function matchesProduct(haystack: string, tokens: string[]): boolean {
   if (tokens.length === 0) return true; // no product name given — don't filter
   const lower = haystack.toLowerCase();
   return tokens.every((t) => {
