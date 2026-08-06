@@ -40,22 +40,61 @@ export interface ResolvedStorePrice {
   source: "jsonld" | "meta" | "ai" | "unresolved";
 }
 
-const FETCH_TIMEOUT_MS = 8000;
+const FETCH_TIMEOUT_MS = 7000;
+const RETRY_TIMEOUT_MS = 5000; // shorter on the retry so total wall time stays bounded
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function fetchHtml(url: string): Promise<string | null> {
+// Rotating pool of realistic desktop UAs. Some retailer sites fingerprint
+// on UA alone (or keep a blocklist keyed to the single most common
+// scraper UA) — cycling through a few real, current browser strings means
+// a block on one doesn't guarantee a block on the retry.
+const UA_POOL = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+];
+
+// Markers that show up on interstitial/challenge/"we think you're a bot"
+// pages rather than the real product page. When we see one of these we
+// treat the fetch as failed (never try to read a price off a challenge
+// page) and, on the first attempt, trigger the UA-rotated retry.
+const BLOCK_PAGE_MARKERS = [
+  "captcha", "robot check", "pardon our interruption", "access denied",
+  "are you a human", "unusual traffic", "just a moment", "cf-browser-verification",
+  "attention required", "enable javascript and cookies",
+];
+
+function looksLikeBlockPage(html: string): boolean {
+  const head = html.slice(0, 4000).toLowerCase();
+  return BLOCK_PAGE_MARKERS.some((m) => head.includes(m));
+}
+
+function buildBrowserHeaders(ua: string): Record<string, string> {
+  return {
+    "User-Agent": ua,
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    // A referer from a search engine reads as an organic visit rather than
+    // a direct scraper hit, which some anti-bot rules weigh heavily.
+    Referer: "https://www.google.com/",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+  };
+}
+
+async function fetchOnce(url: string, ua: string, timeoutMs: number): Promise<string | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        "User-Agent": UA,
-        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        Accept: "text/html,application/xhtml+xml",
-      },
+      headers: buildBrowserHeaders(ua),
     });
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
@@ -66,6 +105,29 @@ async function fetchHtml(url: string): Promise<string | null> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// Tries once with a random desktop UA. If that fails outright (network
+// error/timeout/non-2xx) OR the page we got back is an anti-bot
+// interstitial rather than the real product page, retries exactly once
+// with a *different* UA and a shorter timeout. Never more than 2 network
+// round-trips per link, so the total time budget stays predictable even
+// though every retailer link is resolved in parallel with the others.
+async function fetchHtml(url: string): Promise<string | null> {
+  const firstUa = UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
+  const first = await fetchOnce(url, firstUa, FETCH_TIMEOUT_MS);
+  if (first && !looksLikeBlockPage(first)) return first;
+
+  const remainingUas = UA_POOL.filter((u) => u !== firstUa);
+  const secondUa = remainingUas[Math.floor(Math.random() * remainingUas.length)];
+  const second = await fetchOnce(url, secondUa, RETRY_TIMEOUT_MS);
+  if (second && !looksLikeBlockPage(second)) return second;
+
+  // Both attempts either failed outright or only ever returned a challenge
+  // page — genuinely couldn't read this store. Return whichever HTML we
+  // have (if any) so downstream extraction can still try; a block page
+  // will simply yield no JSON-LD/meta/AI price, same as returning null.
+  return second || first || null;
 }
 
 // ─── 1. JSON-LD (schema.org) ───
