@@ -40,8 +40,16 @@ export interface ResolvedStorePrice {
   source: "jsonld" | "meta" | "ai" | "unresolved";
 }
 
-const FETCH_TIMEOUT_MS = 7000;
-const RETRY_TIMEOUT_MS = 5000; // shorter on the retry so total wall time stays bounded
+const FETCH_TIMEOUT_MS = 6000;
+const RETRY_TIMEOUT_MS = 3500; // shorter on the retry so total wall time stays bounded
+// Hard ceiling on a SINGLE store's entire resolution (fetch + retry + AI
+// fallback combined). Every link is resolved in parallel, so the whole
+// resolvePricesForLinks() call is only ever as slow as its single slowest
+// store — this cap is what keeps one dead/very slow domain from dragging
+// the whole report past a minute. Past this point we give up on that one
+// store and return it unresolved rather than let it hold up every other
+// store's already-successful result.
+const PER_LINK_HARD_CAP_MS = 9500;
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
 
 // Rotating pool of realistic desktop UAs. Some retailer sites fingerprint
@@ -107,27 +115,31 @@ async function fetchOnce(url: string, ua: string, timeoutMs: number): Promise<st
   }
 }
 
-// Tries once with a random desktop UA. If that fails outright (network
-// error/timeout/non-2xx) OR the page we got back is an anti-bot
-// interstitial rather than the real product page, retries exactly once
-// with a *different* UA and a shorter timeout. Never more than 2 network
-// round-trips per link, so the total time budget stays predictable even
-// though every retailer link is resolved in parallel with the others.
+// Tries once with a random desktop UA. Only retries — once, with a
+// *different* UA and a shorter timeout — when the first attempt actually
+// got a response back but it was an anti-bot interstitial rather than the
+// real product page. If the first attempt failed outright (timeout/DNS/
+// network error), we do NOT retry: a host that didn't answer within
+// FETCH_TIMEOUT_MS is usually genuinely slow or unreachable, and stacking
+// a second full timeout on top of the first is exactly what was dragging
+// whole-report analysis time past a minute. Never more than 2 network
+// round-trips per link, and only when they're actually likely to help.
 async function fetchHtml(url: string): Promise<string | null> {
   const firstUa = UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
   const first = await fetchOnce(url, firstUa, FETCH_TIMEOUT_MS);
-  if (first && !looksLikeBlockPage(first)) return first;
+  if (!first) return null; // outright failure — don't retry, just move on
+  if (!looksLikeBlockPage(first)) return first;
 
   const remainingUas = UA_POOL.filter((u) => u !== firstUa);
   const secondUa = remainingUas[Math.floor(Math.random() * remainingUas.length)];
   const second = await fetchOnce(url, secondUa, RETRY_TIMEOUT_MS);
   if (second && !looksLikeBlockPage(second)) return second;
 
-  // Both attempts either failed outright or only ever returned a challenge
-  // page — genuinely couldn't read this store. Return whichever HTML we
-  // have (if any) so downstream extraction can still try; a block page
-  // will simply yield no JSON-LD/meta/AI price, same as returning null.
-  return second || first || null;
+  // Retry either failed outright or also hit a block page — genuinely
+  // couldn't read this store. Return whichever HTML we have (if any) so
+  // downstream extraction can still try; a block page will simply yield no
+  // JSON-LD/meta/AI price, same as returning null.
+  return second || first;
 }
 
 // ─── 1. JSON-LD (schema.org) ───
@@ -285,7 +297,7 @@ async function extractViaAi(html: string, retailer: string, currency: string): P
   }
 }
 
-async function resolveOne(link: RetailerLink, currency: string): Promise<ResolvedStorePrice> {
+async function resolveOneInner(link: RetailerLink, currency: string): Promise<ResolvedStorePrice> {
   const lastChecked = new Date().toISOString();
   const base = { retailer: link.retailer, url: link.url, currency, lastChecked };
 
@@ -310,6 +322,44 @@ async function resolveOne(link: RetailerLink, currency: string): Promise<Resolve
   return { ...base, price: null, inStock: null, imageUrl, source: "unresolved" };
 }
 
+// Hard-caps a single store's ENTIRE resolution (fetch + retry + AI
+// fallback, whatever combination actually ran) at PER_LINK_HARD_CAP_MS.
+// fetchHtml's own internal timeouts already bound the network part, but
+// the AI fallback call on top of a slow-but-successful fetch could still
+// push one store well past what's reasonable — this is the outer safety
+// net that guarantees no single store can hold up the whole report.
+async function resolveOne(link: RetailerLink, currency: string): Promise<ResolvedStorePrice> {
+  const fallback: ResolvedStorePrice = {
+    retailer: link.retailer,
+    url: link.url,
+    price: null,
+    currency,
+    inStock: null,
+    imageUrl: null,
+    lastChecked: new Date().toISOString(),
+    source: "unresolved",
+  };
+  return Promise.race([
+    resolveOneInner(link, currency),
+    new Promise<ResolvedStorePrice>((resolve) =>
+      setTimeout(() => resolve(fallback), PER_LINK_HARD_CAP_MS)
+    ),
+  ]);
+}
+
+// Ceiling on how many retailer links get their price actually resolved.
+// fetchMainProductRetailerLinks() can return up to ~12 links once the
+// broad-discovery links are added on top of the fixed ones — resolving
+// every one of those doesn't make the whole call any slower (they're all
+// parallel, still bounded by PER_LINK_HARD_CAP_MS), but it does mean up to
+// 12 concurrent outbound fetches (plus possible AI-fallback calls) fired
+// from a single serverless invocation, which costs more and adds
+// connection-setup overhead for diminishing returns past a handful of
+// stores. The fixed, most-reliable links always come first in the input
+// array, so slicing keeps those and only trims the long tail of broad-
+// discovery extras.
+const MAX_LINKS_TO_RESOLVE = 8;
+
 /**
  * Resolves real prices for every given retailer link, in parallel.
  * A failure on one link (blocked, timed out, unparseable) never throws —
@@ -320,13 +370,14 @@ export async function resolvePricesForLinks(
   links: RetailerLink[],
   currency: string
 ): Promise<ResolvedStorePrice[]> {
-  const settled = await Promise.allSettled(links.map((link) => resolveOne(link, currency)));
+  const capped = links.slice(0, MAX_LINKS_TO_RESOLVE);
+  const settled = await Promise.allSettled(capped.map((link) => resolveOne(link, currency)));
   return settled.map((r, i) =>
     r.status === "fulfilled"
       ? r.value
       : {
-          retailer: links[i].retailer,
-          url: links[i].url,
+          retailer: capped[i].retailer,
+          url: capped[i].url,
           price: null,
           currency,
           inStock: null,

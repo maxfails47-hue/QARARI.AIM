@@ -83,7 +83,9 @@ function RetailerSearchLinks({
                       ? rp.inStock === false
                         ? lang === "ar" ? "غير متوفر حاليًا" : "Currently out of stock"
                         : lang === "ar" ? "متوفر" : "In stock"
-                      : lang === "ar" ? "شوف السعر الحالي" : "View current price"}
+                      : lang === "ar"
+                        ? "مقدرناش نقرا السعر أوتوماتيك من الصفحة — افتح الرابط للتأكد"
+                        : "Couldn't read the price automatically from this page — open the link to check"}
                   </span>
                 </div>
               </div>

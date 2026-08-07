@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { ShoppingBag, Camera, Scale, ShieldCheck, CheckCircle2, Bell, Sparkles } from "lucide-react";
+import { ShoppingBag, Camera, Scale, Search, ShieldCheck, CheckCircle2, Bell, Sparkles } from "lucide-react";
 
 interface Slide {
   Icon: typeof ShoppingBag;
@@ -13,6 +13,7 @@ const SLIDES: Slide[] = [
   { Icon: ShoppingBag, chipKey: "onboardingSlide1Chip", headlineKey: "onboardingSlide1Headline", bodyKey: "onboardingSlide1Body" },
   { Icon: Camera, chipKey: "onboardingSlide2Chip", headlineKey: "onboardingSlide2Headline", bodyKey: "onboardingSlide2Body" },
   { Icon: Scale, chipKey: "onboardingSlide3Chip", headlineKey: "onboardingSlide3Headline", bodyKey: "onboardingSlide3Body" },
+  { Icon: Search, chipKey: "onboardingSlidePriceSearchChip", headlineKey: "onboardingSlidePriceSearchHeadline", bodyKey: "onboardingSlidePriceSearchBody" },
   { Icon: ShieldCheck, chipKey: "onboardingSlide4Chip", headlineKey: "onboardingSlide4Headline", bodyKey: "onboardingSlide4Body" },
   { Icon: CheckCircle2, chipKey: "onboardingSlide5Chip", headlineKey: "onboardingSlide5Headline", bodyKey: "onboardingSlide5Body" },
   { Icon: Bell, chipKey: "onboardingSlide6Chip", headlineKey: "onboardingSlide6Headline", bodyKey: "onboardingSlide6Body" },
