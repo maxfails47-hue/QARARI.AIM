@@ -176,7 +176,7 @@ export function ReportScreen() {
     fair: { color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" },
     bad: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/30" },
   };
-  const vc = report.verdict ? (verdictConfig[report.verdict] ?? verdictConfig.fair) : verdictConfig.fair;
+  const vc = verdictConfig[report.verdict] ?? verdictConfig.fair;
 
   const ProductIcon = useMemo(() => getCategoryIcon(report.product), [report.product]);
 
@@ -268,13 +268,6 @@ export function ReportScreen() {
     );
   }
 
-  // Past this point we're always in "evaluate" mode (findPrice returned
-  // above), so offeredPrice/verdict are always set — this just proves that
-  // to the type checker without an unsafe cast.
-  if (report.offeredPrice === null || !report.verdict) {
-    return null;
-  }
-
   const handleSave = () => {
     requireAuth(async () => {
       const ok = await saveToHistory(report);
@@ -296,7 +289,7 @@ export function ReportScreen() {
     const variant = isPremium && report.negotiationScriptVariants ? report.negotiationScriptVariants[negVariant] : null;
     // Guard against older/cached reports where a variant exists but is
     // empty — fall back to the base script rather than showing a blank box.
-    return variant && variant.ar ? variant : report.negotiationScript ?? { ar: "", en: "" };
+    return variant && variant.ar ? variant : report.negotiationScript;
   };
 
   const handleCopyNegotiation = () => {

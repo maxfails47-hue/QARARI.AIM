@@ -492,13 +492,11 @@ export function InputScreen() {
       // Guests aren't signed in yet, so this can't be saved to Supabase —
       // keep it in local device history so it's not just gone if they
       // navigate away without creating an account.
-      if (!session?.user && result.priceMode !== "findPrice") addToGuestHistory(result);
+      if (!session?.user) addToGuestHistory(result);
       setRemaining((r) => (r !== null ? Math.max(0, r - 1) : r));
-      // The animated, shareable "reveal" moment is a verdict/price-vs-fair-
-      // range animation — it has nothing to show in find-price mode (no
-      // verdict, no offered price), so skip straight to the lightweight
-      // find-price report. See RevealScreen.tsx / ReportScreen.tsx.
-      navigate(result.priceMode === "findPrice" ? "report" : "reveal");
+      // The animated, shareable "reveal" moment now sits between submit and
+      // the full report — see RevealScreen.tsx.
+      navigate("reveal");
     } catch {
       showToast(lang === "ar" ? "تعذر الاتصال بالخادم" : "Couldn't reach the server");
     } finally {

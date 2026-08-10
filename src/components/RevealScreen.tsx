@@ -68,23 +68,8 @@ export function RevealScreen() {
     return null;
   }
 
-  // Find-price reports have no verdict/offered price to reveal — this
-  // screen is evaluate-mode only. Shouldn't normally happen (InputScreen
-  // routes find-price straight to "report"), but guard defensively.
-  if (report.priceMode === "findPrice" || report.offeredPrice === null || !report.verdict) {
-    navigate("report");
-    return null;
-  }
-
-  // Local narrowed copies: the guard above proves these are non-null, but
-  // that narrowing doesn't survive into the handleShare closure below since
-  // it's a separate function — these plain variables carry the narrowed
-  // type wherever they're used instead.
-  const verdict = report.verdict;
-  const offeredPrice = report.offeredPrice;
-
-  const isBad = verdict === "bad";
-  const vc = VERDICT_STYLES[verdict] ?? VERDICT_STYLES.fair;
+  const isBad = report.verdict === "bad";
+  const vc = VERDICT_STYLES[report.verdict] ?? VERDICT_STYLES.fair;
   const ProductIcon = getCategoryIcon(report.product);
 
   const currencyShort = (code: string) => {
@@ -95,7 +80,7 @@ export function RevealScreen() {
 
   const fmt = (n: number) => Math.round(n).toLocaleString();
 
-  const offeredAnimated = useCountUp(offeredPrice, 900, stage >= 3);
+  const offeredAnimated = useCountUp(report.offeredPrice, 900, stage >= 3);
   const fairAnimated = useCountUp(
     typeof report.marketFairPriceMin === "number" ? report.marketFairPriceMin : null,
     900,
@@ -116,10 +101,10 @@ export function RevealScreen() {
   const max = typeof report.marketFairPriceMax === "number" ? report.marketFairPriceMax : null;
   let barPct = 50;
   if (min !== null && max !== null && max > min) {
-    barPct = Math.max(4, Math.min(100, ((offeredPrice - min) / (max - min)) * 100));
-  } else if (min !== null && offeredPrice <= min) {
+    barPct = Math.max(4, Math.min(100, ((report.offeredPrice - min) / (max - min)) * 100));
+  } else if (min !== null && report.offeredPrice <= min) {
     barPct = 8;
-  } else if (max !== null && offeredPrice >= max) {
+  } else if (max !== null && report.offeredPrice >= max) {
     barPct = 92;
   }
 
@@ -130,13 +115,13 @@ export function RevealScreen() {
     let pctPrefix: string | null = null;
     if (min !== null && min > 0) {
       if (isBad) {
-        const pct = Math.round(((offeredPrice - min) / min) * 100);
+        const pct = Math.round(((report.offeredPrice - min) / min) * 100);
         if (pct > 0) {
           pctLabel = `+${pct}%`;
           pctPrefix = t("shareCardPctOverpriced");
         }
       } else {
-        const pct = Math.round(((min - offeredPrice) / min) * 100);
+        const pct = Math.round(((min - report.offeredPrice) / min) * 100);
         if (pct > 0) {
           pctLabel = `-${pct}%`;
           pctPrefix = t("shareCardPctCheaper");
@@ -148,9 +133,9 @@ export function RevealScreen() {
     try {
       blob = await generateShareCard({
         lang,
-        verdict: verdict,
+        verdict: report.verdict,
         productName: report.product,
-        offeredPrice: offeredPrice,
+        offeredPrice: report.offeredPrice,
         fairPrice: min,
         currencyShort: cShort,
         pctLabel,
@@ -159,7 +144,7 @@ export function RevealScreen() {
           hookLine: isBad ? t("shareCardHookBad") : t("shareCardHookGood"),
           verdictLabel: isBad
             ? t("revealNotGoodDeal")
-            : t(verdict === "good" ? "goodDeal" : "fairDeal"),
+            : t(report.verdict === "good" ? "goodDeal" : "fairDeal"),
           offeredLabel: t("offeredPrice"),
           fairLabel: t("revealFairPriceFrom"),
           fairLockNote: t("shareCardFairLockNote"),
@@ -200,8 +185,8 @@ export function RevealScreen() {
 
     // Last-resort fallback: plain text share (original behavior).
     const summary = `${t("appName")} — ${report.product}\n${t(
-      verdict === "good" ? "goodDeal" : verdict === "fair" ? "fairDeal" : "badDeal"
-    )}\n${t("offeredPrice")}: ${fmt(offeredPrice)} ${cShort}${
+      report.verdict === "good" ? "goodDeal" : report.verdict === "fair" ? "fairDeal" : "badDeal"
+    )}\n${t("offeredPrice")}: ${fmt(report.offeredPrice)} ${cShort}${
       pillAmount !== null
         ? `\n${t(savedAmount !== null ? "revealSavedAmount" : "revealOverpaidAmount")}: ${fmt(pillAmount)} ${cShort}`
         : ""
@@ -234,7 +219,7 @@ export function RevealScreen() {
         <h1 className={`font-serif text-2xl font-bold ${vc.text}`}>
           {isBad
             ? t("revealNotGoodDeal")
-            : t(verdict === "good" ? "goodDeal" : "fairDeal")}
+            : t(report.verdict === "good" ? "goodDeal" : "fairDeal")}
         </h1>
         <p className="mt-1.5 flex items-center justify-center gap-2 text-sm text-zinc-400">
           <ProductIcon className="h-4 w-4 text-amber-400/80" strokeWidth={1.5} />

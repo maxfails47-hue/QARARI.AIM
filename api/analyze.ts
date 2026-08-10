@@ -1140,7 +1140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // a successful analysis so it's never missed. Free/guest users still
     // rely on the manual save button in ReportScreen, unchanged. Never
     // blocks the response if it fails — just logs it.
-    if (user && tier === "premium" && result.priceMode !== "findPrice") {
+    if (user && tier === "premium") {
       try {
         await admin.from("analyses").insert({
           user_id: user.id,
