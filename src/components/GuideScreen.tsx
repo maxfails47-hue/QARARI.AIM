@@ -96,8 +96,8 @@ export function GuideScreen() {
         </h2>
         <p className="mt-2 text-sm text-zinc-400">
           {lang === "ar"
-            ? "تحليلات ومقارنات ورسائل أكتر مع المساعد الذكي، وذاكرة تتذكر اهتماماتك"
-            : "More analyses, comparisons, and advisor messages — plus smart memory that remembers your interests"}
+            ? "تحليلات ورسائل أكتر مع المساعد الذكي، وذاكرة تتذكر اهتماماتك"
+            : "More analyses and advisor messages — plus smart memory that remembers your interests"}
         </p>
         <Button
           onClick={() => navigate("upgrade")}
