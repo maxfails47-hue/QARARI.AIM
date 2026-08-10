@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabaseAdmin } from "../_supabaseAdmin.js";
 import { sendEmail } from "../_resend.js";
 import { getFairPriceRange } from "../_groq_tavily.js";
+import { retryUnresolvedRetailerPrices } from "../_retailerPriceRetry.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep } from "../_logger.js";
 
 // Verifies this request really came from Vercel Cron. Vercel automatically
@@ -204,6 +205,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error(e);
       console.error(e?.stack);
       summary.watchlist = { error: String(e) };
+    }
+
+    logStep("retryUnresolvedRetailerPrices...");
+    try {
+      summary.retailerPriceRetry = await retryUnresolvedRetailerPrices(admin);
+      console.log("[cron] retryUnresolvedRetailerPrices result:", summary.retailerPriceRetry);
+    } catch (e: any) {
+      console.error("[cron] retryUnresolvedRetailerPrices failed:");
+      console.error(e);
+      console.error(e?.stack);
+      summary.retailerPriceRetry = { error: String(e) };
     }
 
     console.log("Saving database...");

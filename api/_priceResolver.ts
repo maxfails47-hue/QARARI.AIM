@@ -37,19 +37,27 @@ export interface ResolvedStorePrice {
   inStock: boolean | null; // null = couldn't determine
   imageUrl: string | null; // product photo, when the page's own JSON-LD/meta has one — never AI-generated
   lastChecked: string; // ISO timestamp
-  source: "jsonld" | "meta" | "ai" | "unresolved";
+  source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "unresolved";
 }
 
 const FETCH_TIMEOUT_MS = 6000;
 const RETRY_TIMEOUT_MS = 3500; // shorter on the retry so total wall time stays bounded
+// Reader-proxy fallback (see fetchViaReaderProxy below) renders the page
+// with JS before returning text, which is inherently slower than a plain
+// fetch — give it its own, separate budget rather than squeezing it into
+// what's left of FETCH_TIMEOUT_MS/RETRY_TIMEOUT_MS.
+const READER_PROXY_TIMEOUT_MS = 7000;
 // Hard ceiling on a SINGLE store's entire resolution (fetch + retry + AI
-// fallback combined). Every link is resolved in parallel, so the whole
-// resolvePricesForLinks() call is only ever as slow as its single slowest
-// store — this cap is what keeps one dead/very slow domain from dragging
-// the whole report past a minute. Past this point we give up on that one
-// store and return it unresolved rather than let it hold up every other
-// store's already-successful result.
-const PER_LINK_HARD_CAP_MS = 9500;
+// fallback + reader-proxy fallback combined). Every link is resolved in
+// parallel, so the whole resolvePricesForLinks() call is only ever as slow
+// as its single slowest store — this cap is what keeps one dead/very slow
+// domain from dragging the whole report past a minute. Past this point we
+// give up on that one store and return it unresolved rather than let it
+// hold up every other store's already-successful result.
+// Raised from 9500 -> 13500 to leave room for the new reader-proxy tier
+// (only reached when the first three tiers all miss) without starving it
+// of a fair timeout of its own.
+const PER_LINK_HARD_CAP_MS = 13500;
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
 
 // Rotating pool of realistic desktop UAs. Some retailer sites fingerprint
@@ -198,6 +206,87 @@ function extractFromMeta(html: string): { price: number | null; inStock: boolean
   return null;
 }
 
+// ─── 2.5. Embedded framework state (Next.js/Nuxt/Redux-style SSR JSON) ───
+// Many modern storefronts (Next.js, Nuxt, and similar SSR frameworks) ship
+// the ENTIRE page's data — including price — as a JSON blob embedded
+// directly in the raw HTML, even on pages where nothing is exposed via
+// schema.org JSON-LD or og:price/product:price meta tags. This is a
+// documented, standard convention used across countless storefronts
+// regardless of retailer (not a guess tailored to one site) — reading it
+// here means ANY site built this way gets its price for free, before ever
+// needing the AI-on-text or reader-proxy tiers below, which cost real time
+// and (for the AI tier) real API budget. Confirmed against a real noon.com
+// Egypt category listing: prices like "EGP1,560" ARE present in the
+// rendered page, just not in JSON-LD/meta form — exactly what this catches
+// when the retailer embeds that data as page-state JSON.
+const STATE_SCRIPT_PATTERNS = [
+  /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
+  /<script[^>]+id=["']__NUXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
+  /<script[^>]+id=["']__APOLLO_STATE__["'][^>]*>([\s\S]*?)<\/script>/i,
+  /window\.__NUXT__\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/i,
+  /window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/i,
+];
+
+const PRICE_KEY_RE = /^(price|saleprice|sellingprice|currentprice|finalprice|specialprice|listprice|unitprice)$/i;
+
+// Prefer a "product/pdp/item"-named subtree first, if one exists, so a
+// price recursively found doesn't accidentally come from an unrelated
+// "recommended products" or "similar items" block elsewhere in the same
+// page-state blob — same concern _priceExtraction.ts's matchesProduct()
+// guards against for the search-snippet path.
+function findNamedSubtree(node: any, nameRe: RegExp, depth = 0): any {
+  if (depth > 6 || node == null || typeof node !== "object") return null;
+  for (const key of Object.keys(node)) {
+    if (nameRe.test(key) && node[key] && typeof node[key] === "object") return node[key];
+  }
+  for (const key of Object.keys(node)) {
+    const found = findNamedSubtree(node[key], nameRe, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findPriceInObject(node: any, depth = 0): number | null {
+  if (depth > 8 || node == null || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findPriceInObject(item, depth + 1);
+      if (found != null) return found;
+    }
+    return null;
+  }
+  for (const key of Object.keys(node)) {
+    const val = node[key];
+    if (PRICE_KEY_RE.test(key) && (typeof val === "number" || typeof val === "string")) {
+      const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : val;
+      if (typeof num === "number" && !Number.isNaN(num) && num > 0) return num;
+    }
+  }
+  for (const key of Object.keys(node)) {
+    const found = findPriceInObject(node[key], depth + 1);
+    if (found != null) return found;
+  }
+  return null;
+}
+
+function extractFromEmbeddedState(html: string): { price: number | null; inStock: boolean | null } | null {
+  for (const pattern of STATE_SCRIPT_PATTERNS) {
+    const m = html.match(pattern);
+    if (!m) continue;
+    try {
+      const parsed = JSON.parse(m[1].trim());
+      const productSubtree = findNamedSubtree(parsed, /^(product|pdp|productdetails|item)$/i);
+      const price = (productSubtree && findPriceInObject(productSubtree)) ?? findPriceInObject(parsed);
+      if (price != null) return { price, inStock: null };
+    } catch {
+      // Malformed/partial JSON captured by the regex (e.g. a trailing
+      // script tag inside a string threw off the lazy match) — try the
+      // next pattern rather than failing the whole tier.
+    }
+  }
+  return null;
+}
+
 // ─── Product image (independent of which price path resolves) ───
 function imageFromJsonLdNode(node: any): string | null {
   const raw = node?.image;
@@ -257,6 +346,38 @@ function extractImage(html: string, pageUrl: string): string | null {
   }
 }
 
+// ─── 4. Reader-proxy fallback — only reached when 1, 2 and 3 all miss ───
+// Real-world failures (Jumia, Noon, apple.com, and various independent
+// store domains in the wild) aren't always a missing JSON-LD tag — plenty
+// are either JS-rendered SPA pages where the price never appears in the raw
+// HTML our plain fetch() gets back, or anti-bot interstitials that
+// looksLikeBlockPage() correctly detects but can't get past on its own.
+// r.jina.ai is a free, no-API-key text-reader proxy that renders the target
+// page (executing its JS) on its own infrastructure and returns the
+// rendered page as plain readable text. Routing through it costs nothing
+// extra to integrate (no new dependency, no new env var) and, because the
+// request originates from their servers rather than ours, it also sidesteps
+// a chunk of the UA/IP-based blocking that trips up our direct fetch. This
+// is a best-effort last resort, not a guarantee — some sites block readers
+// too — so it only fires after the cheaper tiers have already failed.
+async function fetchViaReaderProxy(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), READER_PROXY_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://r.jina.ai/${url}`, {
+      signal: controller.signal,
+      headers: { Accept: "text/plain" },
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text.slice(0, MAX_HTML_BYTES);
+  } catch {
+    return null; // timeout, network error, or the reader itself got blocked
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ─── 3. AI fallback — only reached when 1 and 2 both miss ───
 const PRICE_SCHEMA = {
   type: "object",
@@ -303,6 +424,16 @@ async function resolveOneInner(link: RetailerLink, currency: string): Promise<Re
 
   const html = await fetchHtml(link.url);
   if (!html) {
+    // Direct fetch failed outright (timeout, DNS, connection block) —
+    // still worth trying the reader proxy before giving up entirely, since
+    // it's a fully separate network path (see fetchViaReaderProxy above).
+    const rendered = await fetchViaReaderProxy(link.url);
+    if (rendered) {
+      const renderedAi = await extractViaAi(rendered, link.retailer, currency);
+      if (renderedAi) {
+        return { ...base, price: renderedAi.price, inStock: renderedAi.inStock, imageUrl: null, source: "ai-rendered" };
+      }
+    }
     return { ...base, price: null, inStock: null, imageUrl: null, source: "unresolved" };
   }
 
@@ -316,8 +447,24 @@ async function resolveOneInner(link: RetailerLink, currency: string): Promise<Re
   const meta = extractFromMeta(html);
   if (meta) return { ...base, price: meta.price, inStock: meta.inStock, imageUrl, source: "meta" };
 
+  const embedded = extractFromEmbeddedState(html);
+  if (embedded) return { ...base, price: embedded.price, inStock: embedded.inStock, imageUrl, source: "embedded-state" };
+
   const ai = await extractViaAi(html, link.retailer, currency);
   if (ai) return { ...base, price: ai.price, inStock: ai.inStock, imageUrl, source: "ai" };
+
+  // Tiers 1-3 all missed on the raw fetch — try the JS-rendering reader
+  // proxy as a last resort (see fetchViaReaderProxy above) before giving up.
+  const rendered = await fetchViaReaderProxy(link.url);
+  if (rendered) {
+    const renderedAi = await extractViaAi(rendered, link.retailer, currency);
+    if (renderedAi) {
+      // Reader output is plain text, not the original HTML, so it won't
+      // carry a better product image than what we already pulled (or
+      // didn't) from the raw fetch above — reuse imageUrl as-is.
+      return { ...base, price: renderedAi.price, inStock: renderedAi.inStock, imageUrl, source: "ai-rendered" };
+    }
+  }
 
   return { ...base, price: null, inStock: null, imageUrl, source: "unresolved" };
 }
