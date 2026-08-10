@@ -1,5 +1,5 @@
 import { logStep, logEnvPresence, loggedFetch, loggedJsonParse } from "./_logger.js";
-import { computeMarketPriceRange, isSupportedCurrency, getSignificantTokens, matchesProduct, type SupportedCurrency } from "./_priceExtraction.js";
+import { computeMarketPriceRange, isSupportedCurrency, type SupportedCurrency } from "./_priceExtraction.js";
 import { getFairPriceRangeViaGemini, callAnalysisModelViaGemini } from "./_gemini.js";
 
 const PRIMARY_MODEL = "openai/gpt-oss-120b";
@@ -1211,98 +1211,9 @@ async function fetchRetailerListings(
 }
 
 /**
- * Domains that show up in general product-price searches but are never
- * themselves a store selling the product — social/video platforms, wikis,
- * review-only tech sites, and pure price-comparison aggregators (no
- * checkout/stock of their own, so a "price" read off them isn't a real
- * buyable price). Filtered out before a broad-search hit is ever considered
- * as a candidate retailer.
- */
-const NON_RETAILER_DOMAINS = [
-  "youtube.com", "facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com",
-  "reddit.com", "wikipedia.org", "linkedin.com", "pinterest.com",
-  "google.com", "bing.com", "yahoo.com",
-  "gsmarena.com", "cnet.com", "theverge.com", "engadget.com", "wired.com",
-  "yaoota.com", "pricena.com", "priceoye.pk", "sooq.com",
-  "wa.me", "whatsapp.com", "telegram.org", "t.me",
-];
-
-function isLikelyNonRetailer(domain: string): boolean {
-  return NON_RETAILER_DOMAINS.some((d) => domain === d || domain.endsWith("." + d));
-}
-
-/**
- * Broad, UNRESTRICTED search for the exact product — no site: filter at all,
- * so any real store carrying it (an official brand site, a specialized
- * category store — e.g. an AC/appliance retailer, a local electronics
- * chain — whatever Google itself would surface) can turn up, not just the
- * fixed Amazon/Noon/Jumia/B.TECH list. Two query phrasings are combined
- * (plain "buy" query + the site-restricted "official" brand-site hint
- * already defined per currency in COUNTRY_RETAILERS) since a single Serper
- * call only returns ~10 organic hits and different phrasings surface
- * different stores.
- */
-async function fetchBroadListings(
-  product: string,
-  currency: string,
-  region: { gl: string; hl: string },
-  condition: "new" | "likeNew" | "used"
-): Promise<SerperResult[]> {
-  const qualifier = conditionQualifier(condition);
-  const official = (COUNTRY_RETAILERS[currency] || COUNTRY_RETAILERS.USD).official;
-
-  const generalQuery = `${product} price ${currency} ${qualifier} buy`.trim();
-  const officialQuery = `${product} price ${currency} (${official})`;
-
-  const [general, brand] = await Promise.all([
-    searchSerper(generalQuery, region),
-    searchSerper(officialQuery, region),
-  ]);
-  return [...general, ...brand];
-}
-
-/**
- * Turns broad (unrestricted) search hits into candidate retailer links:
- * drops known non-retailer domains, drops hits that don't actually mention
- * this exact product (reusing the same whole-word token match the fair-price
- * pipeline uses, so an "iPhone 15" search never pulls in an "iPhone 15 Pro"
- * page), keeps only the first hit per domain (one link per store), and caps
- * the total count so price-resolution stays fast.
- */
-function pickBroadRetailerLinks(
-  results: SerperResult[],
-  product: string,
-  seenDomains: Set<string>,
-  maxLinks: number
-): RetailerLink[] {
-  const tokens = getSignificantTokens(product);
-  const links: RetailerLink[] = [];
-
-  for (const r of results) {
-    if (!r.url) continue;
-    const domain = urlDomain(r.url);
-    if (!domain || isLikelyNonRetailer(domain) || seenDomains.has(domain)) continue;
-    if (!matchesProduct(`${r.title} ${r.content}`, tokens)) continue;
-
-    seenDomains.add(domain);
-    links.push({
-      retailer: RETAILER_DISPLAY_NAMES[domain] || domain.replace(/^www\./, ""),
-      url: r.url,
-    });
-    if (links.length >= maxLinks) break;
-  }
-  return links;
-}
-
-/**
- * One-call helper for the main product: combines the reliable, known-domain
- * links (Amazon/Noon/Jumia/B.TECH etc. — direct listing picked from a
- * site-restricted search) with a broad, unrestricted search that can surface
- * ANY other store actually carrying the exact product (an official brand
- * site, a specialized category store, a local chain — whatever's really out
- * there), then de-duplicates by domain so the same store never appears
- * twice. Falls back to plain store-search links only when Serper genuinely
- * returns nothing at all.
+ * One-call helper for the main product: runs the Serper link search and
+ * picks direct listing URLs for the target retailers, falling back to that
+ * store's own search page only when Serper genuinely found nothing.
  */
 export async function fetchMainProductRetailerLinks(
   product: string,
@@ -1312,22 +1223,10 @@ export async function fetchMainProductRetailerLinks(
   try {
     const searchProduct = await normalizeProductNameForSearch(product);
     const region = getRegionForCurrency(currency);
-
-    const [fixedResults, broadResults] = await Promise.all([
-      fetchRetailerListings(searchProduct, currency, region, condition),
-      fetchBroadListings(searchProduct, currency, region, condition),
-    ]);
-
-    const fixedLinks = pickDirectRetailerLinks(fixedResults, searchProduct, currency, condition);
-    const seenDomains = new Set(fixedLinks.map((l) => urlDomain(l.url)));
-    const broadLinks = pickBroadRetailerLinks(broadResults, searchProduct, seenDomains, 8);
-
-    const combined = [...fixedLinks, ...broadLinks];
-    if (combined.length > 0) return combined;
-
-    // Serper returned nothing at all for either query — fall back to plain
-    // store-search links for the known domains so the UI still has
-    // something to show rather than an empty list.
+    const results = await fetchRetailerListings(searchProduct, currency, region, condition);
+    return pickDirectRetailerLinks(results, searchProduct, currency, condition);
+  } catch (e) {
+    console.error("[fetchMainProductRetailerLinks] Serper link fetch failed (non-fatal):", e);
     return buildRetailerSearchLinks(product, currency, condition);
   }
 }

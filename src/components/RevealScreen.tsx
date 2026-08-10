@@ -68,11 +68,6 @@ export function RevealScreen() {
     return null;
   }
 
-  if (report.priceMode === "findPrice") {
-    navigate("report");
-    return null;
-  }
-
   const isBad = report.verdict === "bad";
   const vc = VERDICT_STYLES[report.verdict] ?? VERDICT_STYLES.fair;
   const ProductIcon = getCategoryIcon(report.product);

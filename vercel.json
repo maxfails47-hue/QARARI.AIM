@@ -6,12 +6,6 @@
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/cron/daily", "schedule": "0 3 * * *" },
-    { "path": "/api/cron/retry-prices", "schedule": "0 */4 * * *" }
-  ],
-  "functions": {
-    "api/cron/daily.ts": { "memory": 1536, "maxDuration": 60 },
-    "api/cron/retry-prices.ts": { "memory": 1536, "maxDuration": 60 },
-    "api/analyze.ts": { "memory": 1536, "maxDuration": 60 }
-  }
+    { "path": "/api/cron/daily", "schedule": "0 3 * * *" }
+  ]
 }
