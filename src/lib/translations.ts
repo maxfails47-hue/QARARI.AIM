@@ -279,7 +279,7 @@ export const translations: Record<Language, Record<string, string>> = {
     // ─── Section 4: Photo-to-autofill ───
     extractReadingPhoto: "بنقرا التفاصيل من الصورة...",
     extractReadFromPhoto: "🔍 اتقرت من الصورة — تقدر تعدّلها",
-    extractNoPriceFound: "معرفناش نلاقي السعر في الصورة، اكتبه يدوي",
+    extractNoPriceFound: "معرفناش نلاقي السعر في الصورة — هنجيبلك نطاق السعر العادل بدل ما نوقفك",
     extractFailed: "معرفناش نقرا الصورة — تقدر تكمل البيانات يدوي",
 
     // ─── Section 5: Price input normalization ───
@@ -564,7 +564,7 @@ export const translations: Record<Language, Record<string, string>> = {
     // ─── Section 4: Photo-to-autofill ───
     extractReadingPhoto: "Reading details from the photo...",
     extractReadFromPhoto: "🔍 Read from photo — you can edit it",
-    extractNoPriceFound: "Couldn't find a price in this photo — enter it manually",
+    extractNoPriceFound: "Couldn't find a price in this photo — we'll show you the fair price range instead",
     extractFailed: "Couldn't read the photo — you can fill the form manually",
 
     // ─── Section 5: Price input normalization ───

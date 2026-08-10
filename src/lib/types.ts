@@ -48,10 +48,16 @@ export interface Alternative {
 export interface AnalysisResult {
   id: string;
   product: string;
-  offeredPrice: number;
+  // "evaluate" (default, price given) runs the full AI verdict/negotiation/
+  // alternatives pipeline. "findPrice" (no price given) skips all of that
+  // and returns only the lightweight market-price/retailer-comparison fields
+  // below — see api/analyze.ts hasPrice branch.
+  priceMode?: "evaluate" | "findPrice";
+  offeredPrice: number | null;
   currency: string;
   condition?: string;
-  verdict: Verdict;
+  // Only present in "evaluate" mode.
+  verdict?: Verdict;
   // Nullable: the backend now allows the AI to return null for these when it
   // genuinely has no reliable pricing data, instead of inventing a number.
   marketFairPriceMin: number | null;
@@ -60,18 +66,21 @@ export interface AnalysisResult {
   // A single Gemini/Google-AI-Overview-style analytical paragraph describing
   // the current market price range in natural language (new vs used, min/max).
   marketPriceSummary: BilingualText;
-  moneySaved: number | null;
-  reasoningPoints: BilingualArray;
-  preRecommendation: BilingualText;
-  futureCompatibility: BilingualText;
-  regretLevel: "low" | "medium" | "high";
-  regretJustification: BilingualText;
-  pros: BilingualArray;
-  cons: BilingualArray;
-  hiddenRisks: BilingualArray;
-  finalTip: BilingualText;
-  betterAlternatives: Alternative[];
-  negotiationScript: BilingualText;
+  moneySaved?: number | null;
+  // The following AI-decision fields are only populated in "evaluate" mode;
+  // in "findPrice" mode the backend skips the narrative/verdict call entirely
+  // so these are absent.
+  reasoningPoints?: BilingualArray;
+  preRecommendation?: BilingualText;
+  futureCompatibility?: BilingualText;
+  regretLevel?: "low" | "medium" | "high";
+  regretJustification?: BilingualText;
+  pros?: BilingualArray;
+  cons?: BilingualArray;
+  hiddenRisks?: BilingualArray;
+  finalTip?: BilingualText;
+  betterAlternatives?: Alternative[];
+  negotiationScript?: BilingualText;
   negotiationScriptVariants?: { polite: BilingualText; firm: BilingualText };
   communityInsights?: {
     analyzedCount: number;

@@ -171,7 +171,7 @@ export function HistoryScreen() {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className={`rounded-lg border px-2 py-0.5 text-xs font-medium ${verdictColor[h.verdict] ?? verdictColor.fair}`}>
+                  <span className={`rounded-lg border px-2 py-0.5 text-xs font-medium ${h.verdict ? (verdictColor[h.verdict] ?? verdictColor.fair) : verdictColor.fair}`}>
                     {t(h.verdict === "good" ? "goodDeal" : h.verdict === "fair" ? "fairDeal" : "badDeal")}
                   </span>
                   {typeof h.moneySaved === "number" && h.moneySaved > 0 && (

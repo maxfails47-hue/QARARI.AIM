@@ -1,5 +1,4 @@
 import { useState, useRef, useMemo } from "react";
-import { FutureValueCard } from "@/components/FutureValueCard";
 import { useApp } from "@/lib/AppContext";
 import { supabase } from "@/lib/supabase";
 import { getCategoryIcon } from "@/lib/categoryIcons";
@@ -84,8 +83,8 @@ function RetailerSearchLinks({
                         ? lang === "ar" ? "غير متوفر حاليًا" : "Currently out of stock"
                         : lang === "ar" ? "متوفر" : "In stock"
                       : lang === "ar"
-                        ? "مقدرناش نقرا السعر أوتوماتيك من الصفحة — افتح الرابط للتأكد"
-                        : "Couldn't read the price automatically from this page — open the link to check"}
+                        ? "السعر مش ظاهر أوتوماتيك (حماية من المتجر) — افتح الرابط"
+                        : "Price not shown automatically (store protection) — open the link"}
                   </span>
                 </div>
               </div>
@@ -177,9 +176,104 @@ export function ReportScreen() {
     fair: { color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" },
     bad: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/30" },
   };
-  const vc = verdictConfig[report.verdict] ?? verdictConfig.fair;
+  const vc = report.verdict ? (verdictConfig[report.verdict] ?? verdictConfig.fair) : verdictConfig.fair;
 
   const ProductIcon = useMemo(() => getCategoryIcon(report.product), [report.product]);
+
+  // "Find the price" mode: the person analyzed a product without giving a
+  // price (either on purpose, or because photo OCR couldn't read one off
+  // the listing). There's no offered price to judge, so there's no
+  // verdict, no "money saved", and no negotiation script — just the
+  // researched fair-price range and a real store-by-store comparison.
+  // Rendered as its own lightweight screen instead of threading a
+  // "priceMode" check through every verdict-dependent section below.
+  if (report.priceMode === "findPrice") {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-6 pb-24">
+        {/* Product Header */}
+        <div className="mb-6 flex items-center gap-4">
+          <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-800 via-zinc-900 to-black shadow-lg ring-1 ring-amber-500/20">
+            {report.productImage ? (
+              <img
+                src={report.productImage}
+                alt={report.product}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                className="relative h-full w-full object-contain bg-white p-1.5"
+              />
+            ) : (
+              <>
+                <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/10 via-transparent to-transparent" />
+                <ProductIcon className="relative h-10 w-10 text-amber-400/90" strokeWidth={1.5} />
+              </>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-serif text-2xl font-bold text-amber-400">{report.product}</h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-sm font-medium text-amber-400">
+                <Search className="me-1 inline h-3.5 w-3.5" />
+                {lang === "ar" ? "دورنا على السعر" : "We looked up the price"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Fair Price Range */}
+        <div className="mb-4 rounded-xl border border-amber-500/15 bg-zinc-900/60 p-5">
+          <h2 className="mb-3 flex items-center gap-2 font-serif text-lg font-bold text-amber-400">
+            <Search className="h-5 w-5" /> {t("fairPriceRange")}
+          </h2>
+          <div className="rounded-xl bg-zinc-800/40 p-4 text-center">
+            <p className="text-2xl font-bold text-amber-400">
+              {report.marketFairPriceMin === null && report.marketFairPriceMax === null
+                ? naLabel
+                : `${fmtPrice(report.marketFairPriceMin)}–${fmtPrice(report.marketFairPriceMax)}`}
+            </p>
+            <p className="text-xs text-zinc-500">{cShort}</p>
+          </div>
+          {bilingualSafe(report.marketPriceSummary) && (
+            <p className="mt-3 rounded-lg bg-zinc-800/30 p-3 text-sm leading-relaxed text-zinc-300">
+              {bilingualSafe(report.marketPriceSummary)}
+            </p>
+          )}
+          {report.marketFairPriceMin === null && report.marketFairPriceMax === null && (
+            <p className="mt-3 text-sm text-zinc-400">
+              {lang === "ar"
+                ? "مش لاقيين بيانات سعر موثوقة للمنتج ده دلوقتي — جرب اسم أدق أو شوف الروابط تحت."
+                : "No reliable price data found for this product right now — try a more specific name, or check the links below."}
+            </p>
+          )}
+        </div>
+
+        {/* Real store comparison */}
+        {report.retailerPrices && report.retailerPrices.length > 0 && (
+          <RetailerSearchLinks retailerPrices={report.retailerPrices} lang={lang} />
+        )}
+
+        {/* CTA: now that they know a price, let them get an actual verdict */}
+        <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 text-center">
+          <p className="mb-3 text-sm text-zinc-300">
+            {lang === "ar"
+              ? "لقيت سعر معروض عليك؟ اكتبه وهنقولّك الصفقة كويسة ولا لأ."
+              : "Found an offered price? Enter it and we'll tell you if the deal is good."}
+          </p>
+          <Button
+            onClick={() => navigate("input")}
+            className="bg-gradient-to-br from-amber-300 to-amber-600 font-bold text-[#0B0B0F] hover:brightness-110"
+          >
+            {lang === "ar" ? "قيّم الصفقة الآن" : "Evaluate the deal now"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Past this point we're always in "evaluate" mode (findPrice returned
+  // above), so offeredPrice/verdict are always set — this just proves that
+  // to the type checker without an unsafe cast.
+  if (report.offeredPrice === null || !report.verdict) {
+    return null;
+  }
 
   const handleSave = () => {
     requireAuth(async () => {
@@ -202,7 +296,7 @@ export function ReportScreen() {
     const variant = isPremium && report.negotiationScriptVariants ? report.negotiationScriptVariants[negVariant] : null;
     // Guard against older/cached reports where a variant exists but is
     // empty — fall back to the base script rather than showing a blank box.
-    return variant && variant.ar ? variant : report.negotiationScript;
+    return variant && variant.ar ? variant : report.negotiationScript ?? { ar: "", en: "" };
   };
 
   const handleCopyNegotiation = () => {
@@ -542,17 +636,6 @@ export function ReportScreen() {
           <p className="mt-2 text-sm text-zinc-300">{bilingual(report.regretJustification)}</p>
         </div>
       </div>
-
-      {/* Future Value Card - Premium */}
-      {report.resaleValue2Years && (
-        <FutureValueCard
-          lang={lang}
-          offeredPrice={report.offeredPrice}
-          resaleValue2Years={report.resaleValue2Years}
-          resaleDepreciationRate={report.resaleDepreciationRate}
-          currencyShort={cShort}
-        />
-      )}
 
       {/* Cons + Pros */}
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
