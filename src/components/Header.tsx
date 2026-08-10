@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { Globe, History, User, Sparkles, Plus, GitCompare, Bell, GitCompareArrows, MoreVertical } from "lucide-react";
+import { Globe, History, User, Sparkles, Plus, Bell, MoreVertical } from "lucide-react";
 import { HeaderInstallButton } from "@/components/HeaderInstallButton";
 
 export function Header() {
-  const { lang, setLang, t, navigate, screen, isPremium, user } = useApp();
+  const { lang, setLang, t, navigate, screen, user } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -52,15 +52,6 @@ export function Header() {
             <Plus className="h-5 w-5" />
           </button>
           <button
-            onClick={() => navigate("compare")}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              screen === "compare" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
-            }`}
-            title={t("compareProducts")}
-          >
-            <GitCompare className="h-5 w-5" />
-          </button>
-          <button
             onClick={() => navigate("history")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
               screen === "history" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
@@ -86,7 +77,7 @@ export function Header() {
             <button
               onClick={() => setMenuOpen((v) => !v)}
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                menuOpen || screen === "watchlist" || screen === "comparisonHistory"
+                menuOpen || screen === "watchlist"
                   ? "bg-amber-500/15 text-amber-400"
                   : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
               }`}
@@ -113,22 +104,7 @@ export function Header() {
                     {t("watchlistTitle")}
                   </button>
                 )}
-                {isPremium && (
-                  <button
-                    onClick={() => {
-                      navigate("comparisonHistory");
-                      setMenuOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start text-sm transition-colors hover:bg-zinc-800/70 ${
-                      screen === "comparisonHistory" ? "text-amber-400" : "text-zinc-200"
-                    }`}
-                  >
-                    <GitCompareArrows className="h-4 w-4 shrink-0" />
-                    {t("comparisonHistory")}
-                  </button>
-                )}
-
-                {(user || isPremium) && <div className="my-1 h-px bg-zinc-800" />}
+                {user && <div className="my-1 h-px bg-zinc-800" />}
 
                 <HeaderInstallButton variant="menuItem" onAfterClick={() => setMenuOpen(false)} />
 

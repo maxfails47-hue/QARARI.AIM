@@ -5,12 +5,11 @@ import { getCategoryIcon } from "@/lib/categoryIcons";
 import { currencies, SHOW_BTECH_COMPARISON } from "@/lib/types";
 import type { Verdict } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Search, Info, TrendingUp, AlertTriangle, Check, X, Compass,
   Shield, Lightbulb, Copy, Share2, Bookmark, Bell,
   ThumbsUp, ThumbsDown, MessageCircle, Mic, Send,
-  Sparkles, GitCompare, Crown, Users, RefreshCw, DollarSign, Handshake,
+  Sparkles, Users, RefreshCw, DollarSign, Handshake,
   ExternalLink, ShoppingCart,
 } from "lucide-react";
 
@@ -123,8 +122,6 @@ export function ReportScreen() {
   const [chatLimitHit, setChatLimitHit] = useState(false);
   const [listening, setListening] = useState(false);
   const [negVariant, setNegVariant] = useState<"polite" | "firm">("polite");
-  const [showCompareInput, setShowCompareInput] = useState(false);
-  const [compareProduct, setCompareProduct] = useState("");
   const recognitionRef = useRef<any>(null);
 
   const report = currentReport;
@@ -171,13 +168,6 @@ export function ReportScreen() {
   };
   const cShort = currencyShort(report.currency);
 
-  const verdictConfig: Record<Verdict, { color: string; bg: string; border: string }> = {
-    good: { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30" },
-    fair: { color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" },
-    bad: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/30" },
-  };
-  const vc = verdictConfig[report.verdict] ?? verdictConfig.fair;
-
   const ProductIcon = useMemo(() => getCategoryIcon(report.product), [report.product]);
 
   // "Find the price" mode: the person analyzed a product without giving a
@@ -187,6 +177,12 @@ export function ReportScreen() {
   // researched fair-price range and a real store-by-store comparison.
   // Rendered as its own lightweight screen instead of threading a
   // "priceMode" check through every verdict-dependent section below.
+  //
+  // This check must come before any code that reads report.verdict /
+  // report.offeredPrice / etc.: AnalysisResult is a discriminated union on
+  // priceMode (see src/lib/types.ts), and those fields only exist on the
+  // "evaluate" branch. TypeScript only narrows `report` for code that runs
+  // after this check.
   if (report.priceMode === "findPrice") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-6 pb-24">
@@ -267,6 +263,13 @@ export function ReportScreen() {
       </div>
     );
   }
+
+  const verdictConfig: Record<Verdict, { color: string; bg: string; border: string }> = {
+    good: { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30" },
+    fair: { color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" },
+    bad: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/30" },
+  };
+  const vc = verdictConfig[report.verdict];
 
   const handleSave = () => {
     requireAuth(async () => {
@@ -406,32 +409,6 @@ export function ReportScreen() {
     sendChat(question);
   };
 
-  const handleCompare = () => {
-    if (!isPremium) {
-      navigate("upgrade");
-      return;
-    }
-    if (!compareProduct.trim()) return;
-    // Hand off both sides explicitly: product B is what was just typed here,
-    // product A/price A/currency come from the report currently being viewed.
-    // CompareScreen consumes both one-time on mount, so a later plain visit
-    // to the compare tab (nav bar, history, etc.) starts genuinely blank
-    // instead of re-showing this report's product every time.
-    sessionStorage.setItem("qarari-compare-prefill-b", compareProduct.trim());
-    if (currentReport) {
-      sessionStorage.setItem(
-        "qarari-compare-prefill-a",
-        JSON.stringify({
-          product: currentReport.product,
-          price: currentReport.offeredPrice,
-          currency: currentReport.currency,
-        })
-      );
-    }
-    setShowCompareInput(false);
-    setCompareProduct("");
-    navigate("compare");
-  };
 
   const bilingual = (bt: { ar: string; en: string } | null | undefined) => bilingualSafe(bt);
   const bilingualArr = (ba: { ar: string[]; en: string[] } | null | undefined) => bilingualArrSafe(ba);
@@ -693,7 +670,7 @@ export function ReportScreen() {
         )}
       </div>
 
-      {/* Better Alternatives + Compare Button */}
+      {/* Better Alternatives */}
       <div className="mb-4">
         <h2 className="mb-3 flex items-center gap-2 font-serif text-lg font-bold text-amber-400">
           <Compass className="h-5 w-5" /> {t("betterAlternatives")}
@@ -742,39 +719,6 @@ export function ReportScreen() {
           })}
         </div>
 
-        {/* Compare with another product */}
-        <div className="mt-3">
-          {!showCompareInput ? (
-            <Button
-              onClick={() => setShowCompareInput(true)}
-              variant="outline"
-              className="w-full border-amber-500/30 bg-amber-500/5 text-amber-400 hover:bg-amber-500/10"
-            >
-              <GitCompare className="h-4 w-4" /> {lang === "ar" ? "قارن بمنتج آخر" : "Compare with another product"}
-              {!isPremium && <Crown className="ml-1 h-3 w-3" />}
-            </Button>
-          ) : (
-            <div className="rounded-xl border border-amber-500/20 bg-zinc-900/60 p-4">
-              <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-amber-400">
-                <GitCompare className="h-4 w-4" /> {lang === "ar" ? "قارن بمنتج آخر" : "Compare with another product"}
-              </h3>
-              <div className="flex gap-2">
-                <Input
-                  value={compareProduct}
-                  onChange={(e) => setCompareProduct(e.target.value)}
-                  placeholder={t("productNamePlaceholder")}
-                  className="flex-1 border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50"
-                />
-                <Button onClick={handleCompare} className="bg-amber-500 text-[#0B0B0F] hover:bg-amber-400">
-                  <GitCompare className="h-4 w-4" /> {t("compareNow")}
-                </Button>
-              </div>
-              <button onClick={() => setShowCompareInput(false)} className="mt-2 text-xs text-zinc-500 hover:text-zinc-300">
-                {lang === "ar" ? "إلغاء" : "Cancel"}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Negotiation Script */}

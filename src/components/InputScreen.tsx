@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Camera, Upload, X, Crown, GitCompare, RefreshCw, Mic, Send, HelpCircle } from "lucide-react";
+import { Sparkles, Camera, Upload, X, Crown, RefreshCw, Mic, Send, HelpCircle } from "lucide-react";
 import { getCachedFingerprint } from "@/lib/fingerprint";
 
 export function InputScreen() {
@@ -494,9 +494,12 @@ export function InputScreen() {
       // navigate away without creating an account.
       if (!session?.user) addToGuestHistory(result);
       setRemaining((r) => (r !== null ? Math.max(0, r - 1) : r));
-      // The animated, shareable "reveal" moment now sits between submit and
-      // the full report — see RevealScreen.tsx.
-      navigate("reveal");
+      // The animated, shareable "reveal" moment dramatizes a verdict
+      // (good/fair/bad vs. an offered price), which doesn't exist in
+      // find-price mode — there's no price to judge. Skip straight to the
+      // report for those; everyone else still gets the reveal moment.
+      // See RevealScreen.tsx.
+      navigate(result.priceMode === "findPrice" ? "report" : "reveal");
     } catch {
       showToast(lang === "ar" ? "تعذر الاتصال بالخادم" : "Couldn't reach the server");
     } finally {
@@ -895,16 +898,6 @@ export function InputScreen() {
               ))}
             </div>
           )}
-
-          {/* Compare Button */}
-          <Button
-            onClick={() => navigate("compare")}
-            variant="outline"
-            className="w-full border-amber-500/30 bg-amber-500/5 text-amber-400 hover:bg-amber-500/10"
-          >
-            <GitCompare className="h-4 w-4" /> {t("compareProducts")}
-            {!isPremium && <Crown className="ml-1 h-3 w-3" />}
-          </Button>
 
           {/* Smart Assistant Trigger */}
           <div className="mt-8 flex justify-center">

@@ -1,5 +1,22 @@
 # ملخص التعديلات — Qarari AI
 
+## إزالة كاملة لميزة "المقارنة" و"خسارة القيمة" (هذا التحديث)
+- **`src/components/FutureValueCard.tsx`** — اتمسح خالص (كان أصلاً orphaned/مش موصول بـ `ReportScreen.tsx`).
+- **`src/components/CompareScreen.tsx`** و **`src/components/ComparisonHistoryScreen.tsx`** — اتمسحوا خالص.
+- **`src/App.tsx`** — شيل الـ imports والـ routes بتاعة `compare` و`comparisonHistory`.
+- **`src/components/Header.tsx`** — شيل أيقونة "قارن بين منتجين" وخيار "سجل المقارنات" من قائمة More.
+- **`src/components/InputScreen.tsx`** — شيل زرار "قارن بين منتجين".
+- **`src/components/ReportScreen.tsx`** — شيل فورم/زرار "قارن بمنتج آخر" ودالة `handleCompare` وكل الـ state المرتبطة بيها.
+- **`src/lib/AppContext.tsx`** — شيل `currentCompare`/`setCurrentCompare`.
+- **`src/lib/analysisEngine.ts`** — شيل دالة `generateComparison` بالكامل.
+- **`src/lib/types.ts`** — شيل `"compare"` و`"comparisonHistory"` من نوع `Screen`، وشيل `CompareRow`/`CompareResult` interfaces.
+- **`src/lib/translations.ts`** — شيل مفاتيح `compareProducts`, `compareWith`, `compareNow`, `comparisonHistory`, `compareLimitReached`, `premiumCompareFeature`، ونضّفت وصف خطط الاشتراك (`upgradeDesc`, `oneTimeMediumFeatures`, `oneTimeLargeFeatures`, `smartShopperFeatures`, `powerBuyerFeatures`, `buyWiseEliteFeatures`) من ذكر "المقارنات".
+- **`src/components/GuideScreen.tsx`** — شيل كارت "⚖️ مقارنة ذكية" من قايمة المميزات.
+
+> ملحوظة: الـ backend (`api/user.ts` action=compare، وحقول `compares_limit_this_month` في قاعدة البيانات) لسه موجود زي ما هو ومش متلمس في هذا التحديث، لأنه مش ظاهر للمستخدم بعد شيل الواجهة. لو عايز تشيله كمان من الباك إند والـ migrations، قولي.
+
+---
+
 ## 1. تعديل GuideScreen (دليل الاستخدام)
 - **ملف:** `src/components/GuideScreen.tsx`
 - تم تغيير "50 تحليل شهري (بدل 10 في المجاني)" إلى **"50 تحليل شهري (بدل 5 في المجاني)"**

@@ -1,6 +1,6 @@
 export type Language = "ar" | "en";
 export type Verdict = "good" | "fair" | "bad";
-export type Screen = "input" | "reveal" | "report" | "history" | "profile" | "login" | "upgrade" | "compare" | "guide" | "advisor" | "watchlist" | "comparisonHistory";
+export type Screen = "input" | "reveal" | "report" | "history" | "profile" | "login" | "upgrade" | "guide" | "advisor" | "watchlist";
 
 export interface Currency {
   code: string;
@@ -45,13 +45,11 @@ export interface Alternative {
   searchLinks?: { retailer: string; url: string }[];
 }
 
-export interface AnalysisResult {
+interface AnalysisResultBase {
   id: string;
   product: string;
-  offeredPrice: number;
   currency: string;
   condition?: string;
-  verdict: Verdict;
   // Nullable: the backend now allows the AI to return null for these when it
   // genuinely has no reliable pricing data, instead of inventing a number.
   marketFairPriceMin: number | null;
@@ -60,23 +58,6 @@ export interface AnalysisResult {
   // A single Gemini/Google-AI-Overview-style analytical paragraph describing
   // the current market price range in natural language (new vs used, min/max).
   marketPriceSummary: BilingualText;
-  moneySaved: number | null;
-  reasoningPoints: BilingualArray;
-  preRecommendation: BilingualText;
-  futureCompatibility: BilingualText;
-  regretLevel: "low" | "medium" | "high";
-  regretJustification: BilingualText;
-  pros: BilingualArray;
-  cons: BilingualArray;
-  hiddenRisks: BilingualArray;
-  finalTip: BilingualText;
-  betterAlternatives: Alternative[];
-  negotiationScript: BilingualText;
-  negotiationScriptVariants?: { polite: BilingualText; firm: BilingualText };
-  communityInsights?: {
-    analyzedCount: number;
-    recentPrices: number[];
-  } | null;
   // Resale Value Prediction (2-year outlook only)
   resaleValueRightNow?: number | null;
   resaleValue2Years?: number | null;
@@ -98,36 +79,52 @@ export interface AnalysisResult {
   createdAt: number;
 }
 
+// "Find the price" mode: the user gave no offered price (on purpose, or
+// because photo OCR couldn't read one), so the backend skips the AI
+// verdict/negotiation/alternatives call entirely and only returns the
+// researched market-price fields from AnalysisResultBase — no verdict, no
+// moneySaved, no negotiation script. Matches the `!hasPrice` branch in
+// api/analyze.ts exactly.
+export interface FindPriceResult extends AnalysisResultBase {
+  priceMode: "findPrice";
+  offeredPrice: null;
+}
+
+// The original full flow: a price was given, so the AI produced a verdict,
+// negotiation script, alternatives, etc. `priceMode` is optional here (as
+// `"evaluate"` or absent) so older cached/history results saved before
+// priceMode existed still satisfy this type.
+export interface EvaluateResult extends AnalysisResultBase {
+  priceMode?: "evaluate";
+  offeredPrice: number;
+  verdict: Verdict;
+  moneySaved: number | null;
+  reasoningPoints: BilingualArray;
+  preRecommendation: BilingualText;
+  futureCompatibility: BilingualText;
+  regretLevel: "low" | "medium" | "high";
+  regretJustification: BilingualText;
+  pros: BilingualArray;
+  cons: BilingualArray;
+  hiddenRisks: BilingualArray;
+  finalTip: BilingualText;
+  betterAlternatives: Alternative[];
+  negotiationScript: BilingualText;
+  negotiationScriptVariants?: { polite: BilingualText; firm: BilingualText };
+  communityInsights?: {
+    analyzedCount: number;
+    recentPrices: number[];
+  } | null;
+}
+
+// Check `priceMode` before reading verdict/offeredPrice/moneySaved/etc. —
+// they only exist on the EvaluateResult branch.
+export type AnalysisResult = FindPriceResult | EvaluateResult;
+
 // Feature flag mirroring api/_groq_tavily.ts's SHOW_BTECH_COMPARISON — flip
 // this once a B.TECH affiliate/commission deal is confirmed. Kept as a
 // simple constant since the frontend can't read server env vars directly.
 export const SHOW_BTECH_COMPARISON = false;
-
-export interface CompareRow {
-  category: BilingualText;
-  valueA: BilingualText;
-  valueB: BilingualText;
-  winner: "A" | "B" | "tie";
-}
-
-export interface CompareResult {
-  productA: string;
-  productB: string;
-  rows: CompareRow[];
-  finalRecommendation: BilingualText;
-  priceA: number;
-  priceB: number;
-  currency: string;
-  resaleValueA?: number;
-  resaleValueB?: number;
-  resaleValueTimeframe?: string;
-  warrantyScoreA?: number;
-  warrantyScoreB?: number;
-  marketFairPriceMinA?: number | null;
-  marketFairPriceMaxA?: number | null;
-  marketFairPriceMinB?: number | null;
-  marketFairPriceMaxB?: number | null;
-}
 
 export interface UserProfile {
   id: string;
