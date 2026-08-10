@@ -9,9 +9,11 @@ import { HistoryScreen } from "@/components/HistoryScreen";
 import { ProfileScreen } from "@/components/ProfileScreen";
 import { LoginScreen } from "@/components/LoginScreen";
 import { UpgradeScreen } from "@/components/UpgradeScreen";
+import { CompareScreen } from "@/components/CompareScreen";
 import { GuideScreen } from "@/components/GuideScreen";
 import { AdvisorScreen } from "@/components/AdvisorScreen";
 import { WatchlistScreen } from "@/components/WatchlistScreen";
+import { ComparisonHistoryScreen } from "@/components/ComparisonHistoryScreen";
 import { OnboardingScreen } from "@/components/OnboardingScreen";
 import { HelpSheet } from "@/components/HelpSheet";
 import { HelpCircle } from "lucide-react";
@@ -35,12 +37,16 @@ function ScreenRouter() {
       return <LoginScreen />;
     case "upgrade":
       return <UpgradeScreen />;
+    case "compare":
+      return <CompareScreen />;
     case "guide":
       return <GuideScreen />;
     case "advisor":
       return <AdvisorScreen />;
     case "watchlist":
       return <WatchlistScreen />;
+    case "comparisonHistory":
+      return <ComparisonHistoryScreen />;
 
     default:
       return <DecisionInput />;

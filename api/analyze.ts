@@ -13,7 +13,6 @@ import {
 } from "./_groq_tavily.js";
 import { logAiUsage } from "./_costTracking.js";
 import { resolvePricesForLinks } from "./_priceResolver.js";
-import { hostnameOf, loadKnownBadDomains, persistDomainHealth } from "./_domainHealth.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep, logEnvPresence } from "./_logger.js";
 import { FREE_TIER_LIMITS, DEFAULT_PREMIUM_LIMITS, FAIR_USE_CONFIG, getBurstLimit } from "./_planConfig.js";
 
@@ -501,19 +500,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       deviceFingerprint, // optional: device fingerprint from FingerprintJS
     } = req.body || {};
 
-    // "Find the price" mode: the person doesn't know/didn't provide a
-    // price at all (either they left it blank on purpose, or photo OCR
-    // couldn't read one off the listing). In that case there's no verdict
-    // to compute — offeredPrice is simply absent and we skip straight to
-    // returning the researched fair-price range + real store comparison.
-    const hasPrice = offeredPrice !== undefined && offeredPrice !== null && offeredPrice !== "" && !isNaN(Number(offeredPrice)) && Number(offeredPrice) > 0;
-
     console.log("[/api/analyze] Validating input...");
-    if (!product || typeof product !== "string") {
+    if (!product || typeof product !== "string" || !offeredPrice || Number(offeredPrice) <= 0) {
       console.warn("[/api/analyze] Invalid input:", { product, offeredPrice });
       return res.status(400).json({ error: "invalid_input" });
     }
-    console.log("[/api/analyze] Input OK. product:", product, "| offeredPrice:", hasPrice ? offeredPrice : "(none — find-price mode)", "| currency:", currency);
+    console.log("[/api/analyze] Input OK. product:", product, "| offeredPrice:", offeredPrice, "| currency:", currency);
 
     console.log("Checking authentication...");
     const admin = getSupabaseAdmin();
@@ -785,31 +777,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let productImage: string | null = null;
       try {
         logStep("Resolving live retailer prices...");
-        // Domains with a known-poor plain-fetch success rate (learned from
-        // cumulative history, see _domainHealth.ts) get routed to the
-        // reader-proxy tier first inside resolvePricesForLinks, instead of
-        // burning the fetch+retry budget on a path that's historically
-        // near-0% for them.
-        const knownBadDomains = await loadKnownBadDomains(admin);
-        const resolved = await resolvePricesForLinks(retailerPrices, currency, knownBadDomains);
+        const resolved = await resolvePricesForLinks(retailerPrices, currency);
         const withPrice = resolved.filter((r) => typeof r.price === "number");
-
-        // Feed this live resolution's outcome back into the same
-        // cumulative table — this is what lets the "known bad" signal
-        // accumulate from real user-facing traffic (much higher volume
-        // than the cron retry alone), not just the retry pass. Fire-and-
-        // forget: never await this on the user-facing request path.
-        if (resolved.length > 0) {
-          const liveDomainStats = new Map<string, { attempts: number; fixed: number }>();
-          for (const r of resolved) {
-            const domain = hostnameOf(r.url);
-            const stat = liveDomainStats.get(domain) || { attempts: 0, fixed: 0 };
-            stat.attempts++;
-            if (r.price != null) stat.fixed++;
-            liveDomainStats.set(domain, stat);
-          }
-          persistDomainHealth(admin, liveDomainStats).catch(() => {});
-        }
 
         if (withPrice.length > 0) {
           const prices = withPrice.map((r) => r.price as number);
@@ -856,12 +825,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // The AI model gets the market price as a fact and produces:
       // verdict, reasoning, pros/cons, negotiation, resale, AND alternative names.
       // The alternative pricing research happens separately after the AI call.
-      //
-      // Find-price mode (no offeredPrice) has no verdict to compute and no
-      // point suggesting "better alternatives" to a price the person never
-      // gave us — skip this whole narrative call and hand back just the
-      // researched price range + real store comparison from Step 1 above.
-      if (hasPrice) {
       const tempPrompt = buildPrompt({ product, offeredPrice: Number(offeredPrice), currency, notes, purpose, duration, specs, condition, language, tier, marketPrice });
 
       let aiResult;
@@ -924,6 +887,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         productImage,
       };
 
+      console.log(`[/api/analyze] Compound market price: min=${marketPrice.min}, max=${marketPrice.max}, mid=${marketPrice.mid}`);
+
       // Log AI usage for the market research call
       if (aiUsage) {
         await logAiUsage(admin, {
@@ -934,22 +899,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           usage: aiUsage,
         });
       }
-      } else {
-        // Find-price mode: no AI narrative call, no alternatives — just the
-        // real researched price data from Step 1.
-        modelUsed = "find-price-mode";
-        marketData = {
-          marketFairPriceMin: marketPrice.min,
-          marketFairPriceMax: marketPrice.max,
-          marketFairPriceMid: marketPrice.mid,
-          marketPriceSummary: marketPrice.summary,
-          retailerPrices,
-          betterAlternatives: [],
-          productImage,
-        };
-      }
-
-      console.log(`[/api/analyze] Compound market price: min=${marketPrice.min}, max=${marketPrice.max}, mid=${marketPrice.mid}`);
 
       // Store market data for future requests (product intelligence only)
       await admin.from("analysis_cache").upsert({
@@ -971,29 +920,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // new-product analysis and avoids the per-minute rate-limit errors that
     // a second unnecessary call was causing.
     const normalizedMarket = normalizeMarketData(marketData);
-
-    // ─── Find-price mode: no verdict to compute, assemble a lighter result
-    // directly from the researched market data and skip the AI decision
-    // call, community-insights price logging, and history verdict entirely.
-    let result: Record<string, any>;
-
-    if (!hasPrice) {
-      result = {
-        id: crypto.randomUUID(),
-        product,
-        priceMode: "findPrice",
-        offeredPrice: null,
-        currency,
-        condition,
-        marketFairPriceMin: normalizedMarket.min,
-        marketFairPriceMax: normalizedMarket.max,
-        marketFairPriceMid: normalizedMarket.mid,
-        marketPriceSummary: normalizedMarket.summary,
-        retailerPrices: marketData.retailerPrices,
-        productImage: marketData.productImage ?? null,
-        createdAt: Date.now(),
-      };
-    } else {
 
     let dynamicAiResult: { data: any; modelUsed: string; usage: any };
     if (reusableAiResult) {
@@ -1105,10 +1031,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[/api/analyze] community insights failed:", e);
     }
 
-    result = {
+    const result = {
       id: crypto.randomUUID(),
       product,
-      priceMode: "evaluate",
       offeredPrice: Number(offeredPrice),
       currency,
       condition,
@@ -1126,7 +1051,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       communityInsights,
       createdAt: Date.now(),
     };
-    }
 
     // Usage was already reserved atomically up front (see usageReservation
     // above) — nothing left to record here. This also means a failed
@@ -1145,9 +1069,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await admin.from("analyses").insert({
           user_id: user.id,
           product: result.product,
-          offered_price: result.offeredPrice || 0,
+          offered_price: result.offeredPrice,
           currency: result.currency,
-          verdict: (result as any).verdict || null,
+          verdict: (result as any).verdict,
           market_fair_price_min: result.marketFairPriceMin || 0,
           market_fair_price_max: result.marketFairPriceMax || 0,
           market_fair_price_mid: result.marketFairPriceMid || 0,

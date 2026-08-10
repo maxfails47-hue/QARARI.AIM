@@ -28,7 +28,6 @@
 
 import { callGeminiStructured } from "./_gemini.js";
 import type { RetailerLink } from "./_groq_tavily.js";
-import { hostnameOf } from "./_domainHealth.js";
 
 export interface ResolvedStorePrice {
   retailer: string;
@@ -361,40 +360,22 @@ function extractImage(html: string, pageUrl: string): string | null {
 // a chunk of the UA/IP-based blocking that trips up our direct fetch. This
 // is a best-effort last resort, not a guarantee — some sites block readers
 // too — so it only fires after the cheaper tiers have already failed.
-// Two independent free proxy providers, tried in order. r.jina.ai renders
-// JS on its own infra (best chance against JS-only SPA prices) but gets
-// rate-limited/blocked itself under heavy shared usage; allorigins.win
-// doesn't render JS but still helps against plain IP/UA-based blocking
-// since the request originates from ITS servers, not ours. Trying both
-// costs nothing extra when the first one fails outright — READER_PROXY_TIMEOUT_MS
-// is per-attempt, not shared, so a dead jina.ai doesn't eat into
-// allorigins's own budget.
-const READER_PROXIES: { name: string; build: (url: string) => string }[] = [
-  { name: "jina", build: (url) => `https://r.jina.ai/${url}` },
-  { name: "allorigins", build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
-];
-
 async function fetchViaReaderProxy(url: string): Promise<string | null> {
-  for (const proxy of READER_PROXIES) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), READER_PROXY_TIMEOUT_MS);
-    try {
-      const res = await fetch(proxy.build(url), {
-        signal: controller.signal,
-        headers: { Accept: "text/plain,text/html" },
-      });
-      clearTimeout(timeout);
-      if (!res.ok) continue; // try the next proxy
-      const text = await res.text();
-      if (text && text.length > 40) return text.slice(0, MAX_HTML_BYTES);
-    } catch {
-      // timeout, network error, or this proxy itself got blocked — fall
-      // through to the next one rather than giving up entirely
-    } finally {
-      clearTimeout(timeout);
-    }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), READER_PROXY_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://r.jina.ai/${url}`, {
+      signal: controller.signal,
+      headers: { Accept: "text/plain" },
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text.slice(0, MAX_HTML_BYTES);
+  } catch {
+    return null; // timeout, network error, or the reader itself got blocked
+  } finally {
+    clearTimeout(timeout);
   }
-  return null;
 }
 
 // ─── 3. AI fallback — only reached when 1 and 2 both miss ───
@@ -437,48 +418,16 @@ async function extractViaAi(html: string, retailer: string, currency: string): P
   }
 }
 
-async function resolveOneInner(link: RetailerLink, currency: string, preferReaderProxy: boolean): Promise<ResolvedStorePrice> {
+async function resolveOneInner(link: RetailerLink, currency: string): Promise<ResolvedStorePrice> {
   const lastChecked = new Date().toISOString();
   const base = { retailer: link.retailer, url: link.url, currency, lastChecked };
-
-  // Domains with a known-poor plain-fetch success rate (see
-  // _domainHealth.ts — loaded from cumulative history, not a guess) skip
-  // straight to the reader-proxy tier first. This doesn't touch the
-  // extraction logic itself (still JSON-LD/meta/AI on whatever HTML/text
-  // comes back) — it just reorders WHICH fetch path is tried first, so we
-  // don't burn the fetch+retry budget on a path that's historically ~0%
-  // for this domain before falling back to it if the proxy also misses.
-  // Tracks whether the reader-proxy tier already ran (and, if so, what it
-  // returned) so the fallback tiers further down never fire a second,
-  // redundant proxy request for the same link — READER_PROXY_TIMEOUT_MS is
-  // ~7s, and paying that twice would eat most of PER_LINK_HARD_CAP_MS.
-  let proxyAlreadyTried = false;
-  let proxyResult: string | null = null;
-
-  if (preferReaderProxy) {
-    proxyAlreadyTried = true;
-    proxyResult = await fetchViaReaderProxy(link.url);
-    if (proxyResult) {
-      const imageUrl = extractImage(proxyResult, link.url);
-      const jsonld = extractFromJsonLd(proxyResult);
-      if (jsonld) return { ...base, price: jsonld.price, inStock: jsonld.inStock, imageUrl, source: "jsonld" };
-      const meta = extractFromMeta(proxyResult);
-      if (meta) return { ...base, price: meta.price, inStock: meta.inStock, imageUrl, source: "meta" };
-      const ai = await extractViaAi(proxyResult, link.retailer, currency);
-      if (ai) return { ...base, price: ai.price, inStock: ai.inStock, imageUrl, source: "ai-rendered" };
-    }
-    // Reader-proxy tier missed (or was itself blocked/rate-limited) — fall
-    // through to the normal plain-fetch sequence below as a last resort,
-    // same as any other domain would get.
-  }
 
   const html = await fetchHtml(link.url);
   if (!html) {
     // Direct fetch failed outright (timeout, DNS, connection block) —
     // still worth trying the reader proxy before giving up entirely, since
-    // it's a fully separate network path (see fetchViaReaderProxy above) —
-    // unless we already tried it above for this same link.
-    const rendered = proxyAlreadyTried ? proxyResult : await fetchViaReaderProxy(link.url);
+    // it's a fully separate network path (see fetchViaReaderProxy above).
+    const rendered = await fetchViaReaderProxy(link.url);
     if (rendered) {
       const renderedAi = await extractViaAi(rendered, link.retailer, currency);
       if (renderedAi) {
@@ -505,9 +454,8 @@ async function resolveOneInner(link: RetailerLink, currency: string, preferReade
   if (ai) return { ...base, price: ai.price, inStock: ai.inStock, imageUrl, source: "ai" };
 
   // Tiers 1-3 all missed on the raw fetch — try the JS-rendering reader
-  // proxy as a last resort (see fetchViaReaderProxy above) before giving up
-  // — unless we already tried it earlier for this same link.
-  const rendered = proxyAlreadyTried ? proxyResult : await fetchViaReaderProxy(link.url);
+  // proxy as a last resort (see fetchViaReaderProxy above) before giving up.
+  const rendered = await fetchViaReaderProxy(link.url);
   if (rendered) {
     const renderedAi = await extractViaAi(rendered, link.retailer, currency);
     if (renderedAi) {
@@ -527,7 +475,7 @@ async function resolveOneInner(link: RetailerLink, currency: string, preferReade
 // the AI fallback call on top of a slow-but-successful fetch could still
 // push one store well past what's reasonable — this is the outer safety
 // net that guarantees no single store can hold up the whole report.
-async function resolveOne(link: RetailerLink, currency: string, preferReaderProxy: boolean): Promise<ResolvedStorePrice> {
+async function resolveOne(link: RetailerLink, currency: string): Promise<ResolvedStorePrice> {
   const fallback: ResolvedStorePrice = {
     retailer: link.retailer,
     url: link.url,
@@ -539,7 +487,7 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
     source: "unresolved",
   };
   return Promise.race([
-    resolveOneInner(link, currency, preferReaderProxy),
+    resolveOneInner(link, currency),
     new Promise<ResolvedStorePrice>((resolve) =>
       setTimeout(() => resolve(fallback), PER_LINK_HARD_CAP_MS)
     ),
@@ -567,13 +515,10 @@ const MAX_LINKS_TO_RESOLVE = 8;
  */
 export async function resolvePricesForLinks(
   links: RetailerLink[],
-  currency: string,
-  knownBadDomains: Set<string> = new Set()
+  currency: string
 ): Promise<ResolvedStorePrice[]> {
   const capped = links.slice(0, MAX_LINKS_TO_RESOLVE);
-  const settled = await Promise.allSettled(
-    capped.map((link) => resolveOne(link, currency, knownBadDomains.has(hostnameOf(link.url))))
-  );
+  const settled = await Promise.allSettled(capped.map((link) => resolveOne(link, currency)));
   return settled.map((r, i) =>
     r.status === "fulfilled"
       ? r.value

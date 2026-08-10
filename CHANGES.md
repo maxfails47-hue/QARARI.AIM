@@ -1,22 +1,5 @@
 # ملخص التعديلات — Qarari AI
 
-## إزالة كاملة لميزة "المقارنة" و"خسارة القيمة" (هذا التحديث)
-- **`src/components/FutureValueCard.tsx`** — اتمسح خالص (كان أصلاً orphaned/مش موصول بـ `ReportScreen.tsx`).
-- **`src/components/CompareScreen.tsx`** و **`src/components/ComparisonHistoryScreen.tsx`** — اتمسحوا خالص.
-- **`src/App.tsx`** — شيل الـ imports والـ routes بتاعة `compare` و`comparisonHistory`.
-- **`src/components/Header.tsx`** — شيل أيقونة "قارن بين منتجين" وخيار "سجل المقارنات" من قائمة More.
-- **`src/components/InputScreen.tsx`** — شيل زرار "قارن بين منتجين".
-- **`src/components/ReportScreen.tsx`** — شيل فورم/زرار "قارن بمنتج آخر" ودالة `handleCompare` وكل الـ state المرتبطة بيها.
-- **`src/lib/AppContext.tsx`** — شيل `currentCompare`/`setCurrentCompare`.
-- **`src/lib/analysisEngine.ts`** — شيل دالة `generateComparison` بالكامل.
-- **`src/lib/types.ts`** — شيل `"compare"` و`"comparisonHistory"` من نوع `Screen`، وشيل `CompareRow`/`CompareResult` interfaces.
-- **`src/lib/translations.ts`** — شيل مفاتيح `compareProducts`, `compareWith`, `compareNow`, `comparisonHistory`, `compareLimitReached`, `premiumCompareFeature`، ونضّفت وصف خطط الاشتراك (`upgradeDesc`, `oneTimeMediumFeatures`, `oneTimeLargeFeatures`, `smartShopperFeatures`, `powerBuyerFeatures`, `buyWiseEliteFeatures`) من ذكر "المقارنات".
-- **`src/components/GuideScreen.tsx`** — شيل كارت "⚖️ مقارنة ذكية" من قايمة المميزات.
-
-> ملحوظة: الـ backend (`api/user.ts` action=compare، وحقول `compares_limit_this_month` في قاعدة البيانات) لسه موجود زي ما هو ومش متلمس في هذا التحديث، لأنه مش ظاهر للمستخدم بعد شيل الواجهة. لو عايز تشيله كمان من الباك إند والـ migrations، قولي.
-
----
-
 ## 1. تعديل GuideScreen (دليل الاستخدام)
 - **ملف:** `src/components/GuideScreen.tsx`
 - تم تغيير "50 تحليل شهري (بدل 10 في المجاني)" إلى **"50 تحليل شهري (بدل 5 في المجاني)"**
@@ -213,24 +196,3 @@
 - المتاجر المتخصصة (زي متاجر أجهزة منزلية/تكييفات محلية) بقى ممكن تظهر تلقائيًا لو فعلاً بتبيع المنتج ده، من غير ما نكتب اسمها إحنا يدويًا في كود.
 - كل حاجة تانية (قراءة السعر الحقيقي من الصفحة، الصورة، الهايلايت لأرخص سعر) فضلت زي ما هي — دي بالفعل موجودة ومربوطة صح من التعديل اللي قبل كده.
 - **لسه محتاج:** لو عايز B.TECH يظهر افتراضيًا، لازم تحط `SHOW_BTECH_COMPARISON=true` في Environment Variables على Vercel، وتغيّر السطر في `src/lib/types.ts` (`export const SHOW_BTECH_COMPARISON = false;` → `true`) عشان الفرونت إند يتزامن مع الباك إند.
-
----
-
-## رفع نسبة نجاح قراءة الأسعار (Domain Health Routing + Reader-Proxy تاني)
-
-### المشكلة
-نسبة المتاجر اللي بترجع سعر حقيقي كانت واقفة عند ~50%. السبب الجذري: كل الطبقات (JSON-LD/meta/embedded-state/AI) بتشتغل على `fetch()` عادي بدون متصفح حقيقي، والـ reader-proxy (r.jina.ai) كان بيتجرب في الآخر بس، حتى للدومينات المعروف عنها من الأساس إنها بتفشل مع fetch عادي (زي Amazon/Noon) — يعني كل محاولة عليهم بتستهلك وقت وفرصة في تايرز هتفشل غالبًا قبل ما توصل للطبقة اللي فعلاً ممكن تنجح.
-
-### الحل
-1. **جدول جديد `domain_health`** (`supabase-domain-health-migration.sql`) — بيراكم نسبة النجاح الفعلية لكل دومين عبر الوقت (مش بس داخل تشغيلة cron واحدة زي قبل كده).
-2. **`api/_domainHealth.ts`** (ملف جديد) — `loadKnownBadDomains()` بتجيب كل دومين نسبة نجاحه ≤15% بعد 5 محاولات على الأقل، و`persistDomainHealth()` بتراكم الأرقام الجديدة فوق القديمة.
-3. **`api/_priceResolver.ts`**: `resolvePricesForLinks()` بقت بتاخد `knownBadDomains` اختياري — أي دومين فيها، `resolveOne` بيبدأ بطبقة الـ reader-proxy على طول بدل ما يستناها آخر حاجة، وبيرجع للمسار العادي كـ fallback لو الـ proxy فشل برضه (بدون ما يكرر نفس طلب الـ proxy مرتين لنفس اللينك).
-4. **Reader-proxy تاني احتياطي**: `allorigins.win` بقى بيتجرب لو `r.jina.ai` فشل أو اترفض — نفس المبدأ، مصدر مجاني تاني، بيتجرب بس لو الأول سقط.
-5. **`api/_retailerPriceRetry.ts`**: تشغيلة الـ cron دلوقتي بتحمّل `knownBadDomains` قبل ما تعمل retry، وبعد كل تشغيلة بتراكم النتائج في `domain_health` بدل ما ترميها بعد اللوج بس.
-6. **`api/analyze.ts`**: كل تحليل حي (مش بس الـ cron) بيغذي نفس الجدول بنتيجته (fire-and-forget، من غير ما يبطّئ رد المستخدم) — يعني الإشارة بتتجمع من زيارات المستخدمين الفعلية كمان، مش بس من الـ cron اللي بيشتغل كل فترة.
-
-### المطلوب منك بعد الرفع
-شغّل `supabase-domain-health-migration.sql` في Supabase SQL Editor.
-
-### النتيجة المتوقعة
-مش قفزة فورية لـ 90% — الجدول محتاج يتراكم فيه بيانات كافية الأول (5 محاولات على الأقل لكل دومين) قبل ما يبدأ يوجّه الدومينات الصعبة على الـ proxy من الأول. بعد كام يوم استخدام عادي، المفروض تشوف نسبة النجاح بتزيد تدريجيًا مع كل تحليل وكل تشغيلة cron. الخطوة اللي هتوصلك فعليًا لـ 90%+ (خصوصًا مع Amazon/Noon) هي خدمة scraping مدفوعة (ScraperAPI/ScrapingBee) على الدومينات دي بالذات — دي منفصلة ومحتاجة قرار منك بخصوص التكلفة.

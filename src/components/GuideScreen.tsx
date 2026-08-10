@@ -13,6 +13,12 @@ export function GuideScreen() {
       descEn: "We analyze real prices from Google and show you the fair market range",
     },
     {
+      titleAr: "⚖️ مقارنة ذكية",
+      titleEn: "⚖️ Smart Comparison",
+      descAr: "قارن بين منتجين وشوف الفرق في السعر والجودة والضمان وسعر إعادة البيع",
+      descEn: "Compare products side-by-side with price, quality, warranty, and resale value",
+    },
+    {
       titleAr: "🧠 مساعد شخصي ذكي",
       titleEn: "🧠 Smart Personal Advisor",
       descAr: "اسأل المساعد أي سؤال عن الشراء وهو يرد بنصائح مخصصة لك",
@@ -96,8 +102,8 @@ export function GuideScreen() {
         </h2>
         <p className="mt-2 text-sm text-zinc-400">
           {lang === "ar"
-            ? "تحليلات ورسائل أكتر مع المساعد الذكي، وذاكرة تتذكر اهتماماتك"
-            : "More analyses and advisor messages — plus smart memory that remembers your interests"}
+            ? "تحليلات ومقارنات ورسائل أكتر مع المساعد الذكي، وذاكرة تتذكر اهتماماتك"
+            : "More analyses, comparisons, and advisor messages — plus smart memory that remembers your interests"}
         </p>
         <Button
           onClick={() => navigate("upgrade")}

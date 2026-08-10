@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import type { Language, Screen, AnalysisResult, UserProfile } from "@/lib/types";
+import type { Language, Screen, AnalysisResult, UserProfile, CompareResult } from "@/lib/types";
 import { translations } from "@/lib/translations";
 import { getDemoReport } from "@/lib/analysisEngine";
 import { supabase } from "@/lib/supabase";
@@ -14,6 +14,8 @@ interface AppContextType {
   navigate: (screen: Screen) => void;
   currentReport: AnalysisResult | null;
   setCurrentReport: (r: AnalysisResult | null) => void;
+  currentCompare: CompareResult | null;
+  setCurrentCompare: (r: CompareResult | null) => void;
   history: AnalysisResult[];
   saveToHistory: (r: AnalysisResult) => Promise<boolean>;
   refreshHistory: () => Promise<void>;
@@ -86,6 +88,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // ignore quota errors
     }
   }, []);
+  const [currentCompare, setCurrentCompare] = useState<CompareResult | null>(null);
   const [guestHistory, setGuestHistory] = useState<AnalysisResult[]>(() => {
     try {
       const raw = localStorage.getItem("qarari_guest_history");
@@ -296,11 +299,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       product: r.product,
       offered_price: r.offeredPrice,
       currency: r.currency,
-      verdict: r.priceMode === "findPrice" ? null : r.verdict,
+      verdict: r.verdict,
       market_fair_price_min: r.marketFairPriceMin || 0,
       market_fair_price_max: r.marketFairPriceMax || 0,
       market_fair_price_mid: r.marketFairPriceMid || 0,
-      money_saved: r.priceMode === "findPrice" ? 0 : (r.moneySaved || 0),
+      money_saved: r.moneySaved || 0,
       full_report: r,
     });
     if (error) {
@@ -345,6 +348,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       lang, setLang, dir, t, screen, navigate,
       currentReport, setCurrentReport,
+      currentCompare, setCurrentCompare,
       history: effectiveHistory, saveToHistory, refreshHistory,
       addToGuestHistory,
       user, session, authLoading,
