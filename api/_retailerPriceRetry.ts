@@ -1,4 +1,5 @@
 import { resolvePricesForLinks } from "./_priceResolver.js";
+import { hostnameOf, loadKnownBadDomains, persistDomainHealth } from "./_domainHealth.js";
 
 // ============================================================================
 // Retailer price retry + per-domain health tracking.
@@ -26,14 +27,6 @@ import { resolvePricesForLinks } from "./_priceResolver.js";
 // this surfaces it in the cron summary (visible in the cron_logs table)
 // instead of it silently sitting at a low success rate for weeks.
 // ============================================================================
-
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    return "unknown";
-  }
-}
 
 export interface RetailerPriceRetryResult {
   checked: number;
@@ -69,6 +62,11 @@ export async function retryUnresolvedRetailerPrices(admin: any, rowLimit = 150, 
   let storesFixed = 0;
   const domainStats = new Map<string, { attempts: number; fixed: number }>();
 
+  // Loaded once per cron run (not per row) — domain health doesn't change
+  // meaningfully within a single invocation, and this keeps it to one
+  // extra query instead of one per cache row.
+  const knownBadDomains = await loadKnownBadDomains(admin);
+
   for (const row of batch) {
     try {
       const retailerPrices: any[] = row.market_data.retailerPrices;
@@ -78,7 +76,7 @@ export async function retryUnresolvedRetailerPrices(admin: any, rowLimit = 150, 
       storesRetried += unresolved.length;
       const links = unresolved.map((s: any) => ({ retailer: s.retailer, url: s.url }));
       const currency = unresolved[0]?.currency || "USD";
-      const retried = await resolvePricesForLinks(links, currency);
+      const retried = await resolvePricesForLinks(links, currency, knownBadDomains);
 
       let fixedInRow = 0;
       const retriedByUrl = new Map(retried.map((r) => [r.url, r]));
@@ -111,6 +109,13 @@ export async function retryUnresolvedRetailerPrices(admin: any, rowLimit = 150, 
       console.error(e);
     }
   }
+
+  // Persist this run's tallies into the cumulative domain_health table so
+  // the "known bad" signal survives past this single invocation (see
+  // _domainHealth.ts) — this is what routeReaderProxyFirst-style logic in
+  // api/_priceResolver.ts and the next cron run's knownBadDomains load
+  // above actually read from.
+  await persistDomainHealth(admin, domainStats);
 
   const domainHealth = Array.from(domainStats.entries())
     .map(([domain, stat]) => ({

@@ -1,4 +1,4 @@
-import type { AnalysisResult, CompareResult, Verdict, BilingualText, BilingualArray, Alternative, CompareRow } from "@/lib/types";
+import type { AnalysisResult, Verdict, BilingualText, BilingualArray, Alternative } from "@/lib/types";
 
 const productCategories: Record<string, { ar: string; en: string; basePrice: number; keywords: string[] }> = {
   phone: { ar: "هاتف ذكي", en: "Smartphone", basePrice: 15000, keywords: ["phone", "iphone", "samsung", "galaxy", "pixel", "موبايل", "تليفون", "هاتف"] },
@@ -173,60 +173,6 @@ export function generateAnalysis(product: string, offeredPrice: number, currency
     },
     tradeInValue: Math.round(offeredPrice * 0.72),
     createdAt: Date.now(),
-  };
-}
-
-export function generateComparison(productA: string, productB: string, priceA: number, priceB: number, currency: string): CompareResult {
-  const catA = detectCategory(productA);
-  const catB = detectCategory(productB);
-
-  const rows: CompareRow[] = [
-    {
-      category: { ar: "السعر", en: "Price" },
-      valueA: { ar: `${priceA.toLocaleString()} ${currency}`, en: `${priceA.toLocaleString()} ${currency}` },
-      valueB: { ar: `${priceB.toLocaleString()} ${currency}`, en: `${priceB.toLocaleString()} ${currency}` },
-      winner: priceA < priceB ? "A" : priceB < priceA ? "B" : "tie",
-    },
-    {
-      category: { ar: "الجودة", en: "Quality" },
-      valueA: { ar: "جودة عالية", en: "High quality" },
-      valueB: { ar: "جودة ممتازة", en: "Excellent quality" },
-      winner: Math.random() > 0.5 ? "A" : "B",
-    },
-    {
-      category: { ar: "الأداء", en: "Performance" },
-      valueA: { ar: "أداء قوي", en: "Strong performance" },
-      valueB: { ar: "أداء ممتاز", en: "Excellent performance" },
-      winner: Math.random() > 0.5 ? "A" : "B",
-    },
-    {
-      category: { ar: "التوافق المستقبلي", en: "Future Compatibility" },
-      valueA: { ar: "متوافق 2-3 سنوات", en: "Compatible 2-3 years" },
-      valueB: { ar: "متوافق 3-4 سنوات", en: "Compatible 3-4 years" },
-      winner: Math.random() > 0.5 ? "A" : "B",
-    },
-    {
-      category: { ar: "قيمة مقابل السعر", en: "Value for Money" },
-      valueA: { ar: "قيمة جيدة", en: "Good value" },
-      valueB: { ar: "قيمة ممتازة", en: "Excellent value" },
-      winner: Math.random() > 0.5 ? "A" : "B",
-    },
-  ];
-
-  const winsA = rows.filter((r) => r.winner === "A").length;
-  const winsB = rows.filter((r) => r.winner === "B").length;
-
-  return {
-    productA,
-    productB,
-    rows,
-    finalRecommendation: {
-      ar: winsA > winsB ? `${productA} هو الخيار الأفضل بناءً على المقارنة.` : winsB > winsA ? `${productB} هو الخيار الأفضل بناءً على المقارنة.` : "المنتجان متقاربان، اختر حسب احتياجك.",
-      en: winsA > winsB ? `${productA} is the better choice based on comparison.` : winsB > winsA ? `${productB} is the better choice based on comparison.` : "Both products are comparable, choose based on your needs.",
-    },
-    priceA,
-    priceB,
-    currency,
   };
 }
 

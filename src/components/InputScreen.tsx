@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Camera, Upload, X, Crown, GitCompare, RefreshCw, Mic, Send, HelpCircle } from "lucide-react";
+import { Sparkles, Camera, Upload, X, Crown, RefreshCw, Mic, Send, HelpCircle } from "lucide-react";
 import { getCachedFingerprint } from "@/lib/fingerprint";
 
 export function InputScreen() {
@@ -35,6 +35,11 @@ export function InputScreen() {
   const [highlightPrice, setHighlightPrice] = useState(false);
   // Section 5: inline hint shown when the typed price can't be parsed.
   const [priceHint, setPriceHint] = useState(false);
+  // "Find the price" mode: the person doesn't know the price at all (they
+  // toggled it on manually, or photo OCR couldn't read one off the
+  // listing). Price becomes optional and the analysis returns a fair-price
+  // range + real store comparison instead of a good/fair/bad verdict.
+  const [priceUnknown, setPriceUnknown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
@@ -370,11 +375,16 @@ export function InputScreen() {
       }
       if (typeof result.price === "number" && result.price > 0) {
         setPrice(String(result.price));
+        setPriceUnknown(false);
         setHighlightPrice(true);
         setTimeout(() => setHighlightPrice(false), 2500);
         setExtractCaption(t("extractReadFromPhoto"));
       } else {
-        // Never fabricate a price — leave it empty and say so plainly.
+        // Never fabricate a price — instead of blocking on a manual price
+        // entry, switch straight into "find the price" mode so the person
+        // still gets a useful result (fair price range + real store
+        // comparison) from this same photo.
+        setPriceUnknown(true);
         setExtractCaption(t("extractNoPriceFound"));
       }
       if (result.currency && currencies.some((c) => c.code === result.currency)) {
@@ -414,10 +424,18 @@ export function InputScreen() {
     // Section 5: normalize the raw price text (Arabic-Indic digits,
     // thousands separators, "50 الف"/"1.5 مليون" shorthand, etc.) instead of
     // a plain parseFloat — see src/lib/parsePrice.ts.
-    const parsedPrice = parsePrice(price);
-    if (!product.trim() || parsedPrice === null || parsedPrice <= 0) {
-      setPriceHint(parsedPrice === null || parsedPrice <= 0);
-      showToast(lang === "ar" ? "اكتب اسم المنتج والسعر" : "Enter product name and price");
+    // In "find the price" mode, the price is intentionally omitted — skip
+    // price parsing/validation entirely and let the request go through
+    // with no offeredPrice, so the server returns a fair-price range
+    // instead of a verdict.
+    const parsedPrice = priceUnknown ? null : parsePrice(price);
+    if (!product.trim() || (!priceUnknown && (parsedPrice === null || parsedPrice <= 0))) {
+      setPriceHint(!priceUnknown && (parsedPrice === null || parsedPrice <= 0));
+      showToast(
+        priceUnknown
+          ? (lang === "ar" ? "اكتب اسم المنتج" : "Enter the product name")
+          : (lang === "ar" ? "اكتب اسم المنتج والسعر" : "Enter product name and price")
+      );
       return;
     }
     setPriceHint(false);
@@ -435,7 +453,7 @@ export function InputScreen() {
 
       const body: Record<string, any> = {
         product: product.trim(),
-        offeredPrice: parsedPrice,
+        offeredPrice: priceUnknown ? null : parsedPrice,
         currency,
         notes: "",
         purpose,
@@ -476,9 +494,12 @@ export function InputScreen() {
       // navigate away without creating an account.
       if (!session?.user) addToGuestHistory(result);
       setRemaining((r) => (r !== null ? Math.max(0, r - 1) : r));
-      // The animated, shareable "reveal" moment now sits between submit and
-      // the full report — see RevealScreen.tsx.
-      navigate("reveal");
+      // The animated, shareable "reveal" moment dramatizes a verdict
+      // (good/fair/bad vs. an offered price), which doesn't exist in
+      // find-price mode — there's no price to judge. Skip straight to the
+      // report for those; everyone else still gets the reveal moment.
+      // See RevealScreen.tsx.
+      navigate(result.priceMode === "findPrice" ? "report" : "reveal");
     } catch {
       showToast(lang === "ar" ? "تعذر الاتصال بالخادم" : "Couldn't reach the server");
     } finally {
@@ -643,11 +664,16 @@ export function InputScreen() {
           {/* Price + Currency */}
           <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label className="text-sm font-medium text-zinc-300">{t("offeredPrice")}</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm font-medium text-zinc-300">
+                {t("offeredPrice")}{priceUnknown && (lang === "ar" ? " (اختياري)" : " (optional)")}
+              </Label>
+            </div>
             <Input
               type="text"
               inputMode="decimal"
               value={price}
+              disabled={priceUnknown}
               onChange={(e) => {
                 setPrice(e.target.value);
                 if (priceHint) setPriceHint(false);
@@ -655,8 +681,8 @@ export function InputScreen() {
               onBlur={() => {
                 if (price.trim() && parsePrice(price) === null) setPriceHint(true);
               }}
-              placeholder={t("pricePlaceholderHint")}
-              className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 ${highlightPrice ? "field-autofill-glow" : ""}`}
+              placeholder={priceUnknown ? (lang === "ar" ? "مش معروف" : "Unknown") : t("pricePlaceholderHint")}
+              className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 disabled:opacity-50 ${highlightPrice ? "field-autofill-glow" : ""}`}
             />
             {priceHint && (
               <p className="text-[11px] text-amber-400">{t("priceParseHint")}</p>
@@ -681,6 +707,27 @@ export function InputScreen() {
               </Select>
             </div>
           </div>
+
+          {/* "Don't know the price?" toggle — switches the analysis into
+              find-the-price mode: price becomes optional, and the report
+              shows a fair-price range + real store comparison instead of a
+              good/fair/bad verdict (which needs an offered price to judge). */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !priceUnknown;
+              setPriceUnknown(next);
+              if (next) { setPrice(""); setPriceHint(false); }
+            }}
+            className={`flex items-center gap-2 self-start rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+              priceUnknown
+                ? "border-amber-400 bg-amber-500/15 text-amber-400"
+                : "border-zinc-700 bg-transparent text-zinc-400 hover:border-amber-500/40 hover:text-amber-400"
+            }`}
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+            {lang === "ar" ? "مش عارف السعر؟" : "Don't know the price?"}
+          </button>
 
           {/* Product Condition — only shown for products where "used vs new"
               genuinely changes the analysis (electronics-type items). For
@@ -851,16 +898,6 @@ export function InputScreen() {
               ))}
             </div>
           )}
-
-          {/* Compare Button */}
-          <Button
-            onClick={() => navigate("compare")}
-            variant="outline"
-            className="w-full border-amber-500/30 bg-amber-500/5 text-amber-400 hover:bg-amber-500/10"
-          >
-            <GitCompare className="h-4 w-4" /> {t("compareProducts")}
-            {!isPremium && <Crown className="ml-1 h-3 w-3" />}
-          </Button>
 
           {/* Smart Assistant Trigger */}
           <div className="mt-8 flex justify-center">

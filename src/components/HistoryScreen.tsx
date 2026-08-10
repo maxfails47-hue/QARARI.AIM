@@ -6,6 +6,15 @@ import type { Verdict } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, ChevronLeft, TrendingUp, TrendingDown, Calendar, Flame, Package } from "lucide-react";
+import type { AnalysisResult } from "@/lib/types";
+
+// Find-price-mode history entries (no offered price given) have no verdict
+// or moneySaved at all — AnalysisResult is a discriminated union on
+// priceMode. These read either field back as undefined for that case
+// instead of erroring, so the stats/badges below can treat them as
+// "not applicable" rather than crashing or silently miscounting as "bad".
+const verdictOf = (h: AnalysisResult): Verdict | undefined => (h.priceMode === "findPrice" ? undefined : h.verdict);
+const moneySavedOf = (h: AnalysisResult): number | null | undefined => (h.priceMode === "findPrice" ? undefined : h.moneySaved);
 
 export function HistoryScreen() {
   const { t, lang, dir, history, navigate, setCurrentReport, user, session } = useApp();
@@ -21,9 +30,9 @@ export function HistoryScreen() {
     const now = new Date();
     const monthAgo = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
     const thisMonth = history.filter((h) => h.createdAt >= monthAgo);
-    const totalSaved = history.reduce((sum, h) => sum + (typeof h.moneySaved === "number" ? h.moneySaved : 0), 0);
-    const goodDeals = history.filter((h) => h.verdict === "good").length;
-    const badDeals = history.filter((h) => h.verdict === "bad").length;
+    const totalSaved = history.reduce((sum, h) => sum + (typeof moneySavedOf(h) === "number" ? (moneySavedOf(h) as number) : 0), 0);
+    const goodDeals = history.filter((h) => verdictOf(h) === "good").length;
+    const badDeals = history.filter((h) => verdictOf(h) === "bad").length;
 
     const dates = [...new Set(history.map((h) => new Date(h.createdAt).toDateString()))].sort();
     let streak = 0;
@@ -45,7 +54,7 @@ export function HistoryScreen() {
   const filtered = useMemo(() => {
     return history.filter((h) => {
       const matchesSearch = h.product.toLowerCase().includes(search.toLowerCase());
-      const matchesFilter = filter === "all" || h.verdict === filter;
+      const matchesFilter = filter === "all" || verdictOf(h) === filter;
       return matchesSearch && matchesFilter;
     });
   }, [history, search, filter]);
@@ -171,12 +180,18 @@ export function HistoryScreen() {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className={`rounded-lg border px-2 py-0.5 text-xs font-medium ${verdictColor[h.verdict] ?? verdictColor.fair}`}>
-                    {t(h.verdict === "good" ? "goodDeal" : h.verdict === "fair" ? "fairDeal" : "badDeal")}
-                  </span>
-                  {typeof h.moneySaved === "number" && h.moneySaved > 0 && (
+                  {h.priceMode === "findPrice" ? (
+                    <span className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400">
+                      {lang === "ar" ? "دورنا على السعر" : "Price lookup"}
+                    </span>
+                  ) : (
+                    <span className={`rounded-lg border px-2 py-0.5 text-xs font-medium ${verdictColor[verdictOf(h) ?? "fair"] ?? verdictColor.fair}`}>
+                      {t(verdictOf(h) === "good" ? "goodDeal" : verdictOf(h) === "fair" ? "fairDeal" : "badDeal")}
+                    </span>
+                  )}
+                  {typeof moneySavedOf(h) === "number" && (moneySavedOf(h) as number) > 0 && (
                     <span className="text-xs font-bold text-emerald-400">
-                      {h.moneySaved.toLocaleString()} {cShort}
+                      {(moneySavedOf(h) as number).toLocaleString()} {cShort}
                     </span>
                   )}
                 </div>
