@@ -126,10 +126,11 @@ export interface EvaluateResult extends AnalysisResultBase {
 // they only exist on the EvaluateResult branch.
 export type AnalysisResult = FindPriceResult | EvaluateResult;
 
-// Feature flag mirroring api/_groq_tavily.ts's SHOW_BTECH_COMPARISON — flip
-// this once a B.TECH affiliate/commission deal is confirmed. Kept as a
-// simple constant since the frontend can't read server env vars directly.
-export const SHOW_BTECH_COMPARISON = false;
+// Qarari runs on subscriptions, not retailer affiliate/commission deals —
+// every store that carries the product is shown, with no gating by
+// commercial relationship. (Previously this held a SHOW_BTECH_COMPARISON
+// flag that hid B.TECH pending an affiliate deal; removed since that's not
+// how this product makes money.)
 
 export interface UserProfile {
   id: string;

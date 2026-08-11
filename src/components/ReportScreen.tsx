@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from "react";
 import { useApp } from "@/lib/AppContext";
 import { supabase } from "@/lib/supabase";
 import { getCategoryIcon } from "@/lib/categoryIcons";
-import { currencies, SHOW_BTECH_COMPARISON } from "@/lib/types";
+import { currencies } from "@/lib/types";
 import type { Verdict } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,9 +36,7 @@ function RetailerSearchLinks({
   retailerPrices: { retailer: string; url: string; price?: number | null; currency?: string; inStock?: boolean | null; lastChecked?: string; matched?: boolean }[];
   lang: "ar" | "en";
 }) {
-  const visibleLinks = retailerPrices.filter(
-    (rp) => SHOW_BTECH_COMPARISON || rp.retailer.toUpperCase() !== "B.TECH"
-  );
+  const visibleLinks = retailerPrices;
 
   if (visibleLinks.length < 1) return null;
 
@@ -778,9 +776,7 @@ export function ReportScreen() {
         <div className="space-y-3">
           {(report.betterAlternatives ?? []).map((alt, i) => {
             const AltIcon = getCategoryIcon(alt?.name ?? "");
-            const altLinks = (alt?.searchLinks ?? []).filter(
-              (l) => SHOW_BTECH_COMPARISON || l.retailer.toUpperCase() !== "B.TECH"
-            );
+            const altLinks = alt?.searchLinks ?? [];
             return (
               <div key={i} className="flex items-start gap-3 rounded-xl border border-amber-500/15 bg-zinc-900/60 p-4">
                 <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-zinc-800 via-zinc-900 to-black shadow-md ring-1 ring-amber-500/20">

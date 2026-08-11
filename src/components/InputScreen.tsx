@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useApp } from "@/lib/AppContext";
 import { getCategoryIcon, getIconByCategory, getCategoryKey, isConditionRelevant } from "@/lib/categoryIcons";
 import { getVariantChipGroups } from "@/lib/variantChips";
-import { currencies, FREE_MONTHLY_LIMIT } from "@/lib/types";
+import { FREE_MONTHLY_LIMIT } from "@/lib/types";
 import { getDemoReport } from "@/lib/analysisEngine";
 import { parsePrice } from "@/lib/parsePrice";
 import { supabase } from "@/lib/supabase";
@@ -19,7 +19,11 @@ export function InputScreen() {
   const { t, lang, navigate, setCurrentReport, isPremium, session, showToast, history, saveToHistory, addToGuestHistory, setHelpSheetOpen } = useApp();
   const [product, setProduct] = useState("");
   const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState("EGP");
+  // Currency is locked to EGP — no selector, no override from photo
+  // extraction. The whole product only serves the Egyptian market for now,
+  // so letting it vary just adds a field the customer has to think about
+  // for no benefit.
+  const currency = "EGP";
 
   const [purpose, setPurpose] = useState("personal");
   const [duration, setDuration] = useState("oneToTwoYears");
@@ -387,9 +391,8 @@ export function InputScreen() {
         setPriceUnknown(true);
         setExtractCaption(t("extractNoPriceFound"));
       }
-      if (result.currency && currencies.some((c) => c.code === result.currency)) {
-        setCurrency(result.currency);
-      }
+      // Currency is locked to EGP app-wide — intentionally ignore any
+      // currency the photo extraction thinks it found.
     } catch {
       // Extraction failing is never blocking — just stop the animation and
       // let the person fill the form manually.
@@ -661,51 +664,39 @@ export function InputScreen() {
             )}
           </div>
 
-          {/* Price + Currency */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Price — currency is fixed to EGP app-wide, so no selector here. */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <Label className="text-sm font-medium text-zinc-300">
                 {t("offeredPrice")}{priceUnknown && (lang === "ar" ? " (اختياري)" : " (optional)")}
               </Label>
             </div>
-            <Input
-              type="text"
-              inputMode="decimal"
-              value={price}
-              disabled={priceUnknown}
-              onChange={(e) => {
-                setPrice(e.target.value);
-                if (priceHint) setPriceHint(false);
-              }}
-              onBlur={() => {
-                if (price.trim() && parsePrice(price) === null) setPriceHint(true);
-              }}
-              placeholder={priceUnknown ? (lang === "ar" ? "مش معروف" : "Unknown") : t("pricePlaceholderHint")}
-              className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 disabled:opacity-50 ${highlightPrice ? "field-autofill-glow" : ""}`}
-            />
+            <div className="relative">
+              <Input
+                type="text"
+                inputMode="decimal"
+                value={price}
+                disabled={priceUnknown}
+                onChange={(e) => {
+                  setPrice(e.target.value);
+                  if (priceHint) setPriceHint(false);
+                }}
+                onBlur={() => {
+                  if (price.trim() && parsePrice(price) === null) setPriceHint(true);
+                }}
+                placeholder={priceUnknown ? (lang === "ar" ? "مش معروف" : "Unknown") : t("pricePlaceholderHint")}
+                className={`border-zinc-700 bg-zinc-800/50 text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 disabled:opacity-50 ltr:pr-16 rtl:pl-16 ${highlightPrice ? "field-autofill-glow" : ""}`}
+              />
+              <span className="pointer-events-none absolute top-1/2 -translate-y-1/2 text-sm font-medium text-zinc-500 ltr:right-3 rtl:left-3">
+                {lang === "ar" ? "جنيه" : "EGP"}
+              </span>
+            </div>
             {priceHint && (
               <p className="text-[11px] text-amber-400">{t("priceParseHint")}</p>
             )}
             {highlightPrice && !priceHint && (
               <p className="text-[11px] text-amber-400">{t("extractReadFromPhoto")}</p>
             )}
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium text-zinc-300">{t("currency")}</Label>
-              <Select value={currency} onValueChange={setCurrency}>
-                <SelectTrigger className="border-zinc-700 bg-zinc-800/50 text-zinc-100 focus:border-amber-500/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-zinc-700 bg-zinc-800 text-zinc-100">
-                  {currencies.map((c) => (
-                    <SelectItem key={c.code} value={c.code} className="focus:bg-amber-500/20 focus:text-amber-400">
-                      {lang === "ar" ? `${c.arName} (${c.arShort})` : `${c.enName} (${c.enShort})`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
           {/* "Don't know the price?" toggle — switches the analysis into

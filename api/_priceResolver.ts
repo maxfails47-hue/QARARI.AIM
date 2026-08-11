@@ -569,17 +569,16 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
 }
 
 // Ceiling on how many retailer links get their price actually resolved.
-// fetchMainProductRetailerLinks() can return up to ~12 links once the
-// broad-discovery links are added on top of the fixed ones — resolving
-// every one of those doesn't make the whole call any slower (they're all
-// parallel, still bounded by PER_LINK_HARD_CAP_MS), but it does mean up to
-// 12 concurrent outbound fetches (plus possible AI-fallback calls) fired
-// from a single serverless invocation, which costs more and adds
-// connection-setup overhead for diminishing returns past a handful of
-// stores. The fixed, most-reliable links always come first in the input
-// array, so slicing keeps those and only trims the long tail of broad-
-// discovery extras.
-const MAX_LINKS_TO_RESOLVE = 8;
+// fetchMainProductRetailerLinks() can return up to ~17 links once the
+// broad-discovery links are added on top of the fixed marketplace domains
+// (9 fixed for EGP + up to 8 broad-discovery extras). The whole point of
+// this product is showing the customer EVERY real store that carries the
+// item so they can find the cheapest price — silently dropping stores past
+// an arbitrary cutoff directly undermines that, so this cap exists only to
+// bound worst-case concurrency/cost, not to hide legitimate stores. Set
+// high enough that it should essentially never actually trim a real result
+// in practice.
+const MAX_LINKS_TO_RESOLVE = 20;
 
 /**
  * Resolves real prices for every given retailer link, in parallel.

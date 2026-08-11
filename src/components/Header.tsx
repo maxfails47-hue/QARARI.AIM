@@ -43,6 +43,15 @@ export function Header() {
 
         <div className="flex items-center gap-1.5">
           <button
+            onClick={() => navigate("input")}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+              screen === "input" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
+            }`}
+            title={t("newDecision")}
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+          <button
             onClick={() => navigate(isPremium ? "profile" : "upgrade")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
               isPremium
@@ -53,15 +62,6 @@ export function Header() {
             aria-label={isPremium ? (lang === "ar" ? "عضو بريميوم" : "Premium member") : (lang === "ar" ? "ترقية لبريميوم" : "Upgrade to Premium")}
           >
             <Crown className="h-5 w-5" fill={isPremium ? "currentColor" : "none"} />
-          </button>
-          <button
-            onClick={() => navigate("input")}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              screen === "input" ? "bg-amber-500/15 text-amber-400" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-amber-400"
-            }`}
-            title={t("newDecision")}
-          >
-            <Plus className="h-5 w-5" />
           </button>
           <button
             onClick={() => navigate("history")}
