@@ -369,9 +369,28 @@ function extractImage(html: string, pageUrl: string): string | null {
 // costs nothing extra when the first one fails outright — READER_PROXY_TIMEOUT_MS
 // is per-attempt, not shared, so a dead jina.ai doesn't eat into
 // allorigins's own budget.
+// ScraperAPI (https://scraperapi.com) — paid, key-based proxy/render service.
+// Free tier only covers ~200 e-commerce (render=true) requests per month, so
+// this is deliberately tried LAST, after the free jina/allorigins proxies —
+// it only fires when those two have already failed to get a usable page,
+// which keeps the paid quota spent only on the domains that genuinely need
+// it instead of burning it on links the free tiers would've resolved anyway.
+// Silently skipped if SCRAPERAPI_KEY isn't set, so this stays safe to
+// deploy/run without the key configured.
+const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY || "";
+
 const READER_PROXIES: { name: string; build: (url: string) => string }[] = [
   { name: "jina", build: (url) => `https://r.jina.ai/${url}` },
   { name: "allorigins", build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
+  ...(SCRAPERAPI_KEY
+    ? [
+        {
+          name: "scraperapi",
+          build: (url: string) =>
+            `https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(url)}&render=true`,
+        },
+      ]
+    : []),
 ];
 
 async function fetchViaReaderProxy(url: string): Promise<string | null> {
