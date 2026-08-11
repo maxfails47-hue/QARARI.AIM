@@ -792,11 +792,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // near-0% for them.
         const knownBadDomains = await loadKnownBadDomains(admin);
         const resolved = await resolvePricesForLinks(retailerPrices, currency, knownBadDomains);
-        // Exclude "similar product, not an exact match" hits (matched ===
-        // false — see _groq_tavily.ts) from ever feeding the fair-price
-        // range: a price read off a different model would skew the range
-        // even though the store link itself is legitimate to show.
-        const withPrice = resolved.filter((r) => typeof r.price === "number" && r.matched !== false);
+        const withPrice = resolved.filter((r) => typeof r.price === "number");
 
         // Feed this live resolution's outcome back into the same
         // cumulative table — this is what lets the "known bad" signal
@@ -815,14 +811,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           persistDomainHealth(admin, liveDomainStats).catch(() => {});
         }
 
-        // Only trust the REAL prices as the fair-price range once enough of
-        // them came back — 1-3 stores is too thin a sample to safely
-        // replace the AI's own broader-market estimate with (a single
-        // store's price isn't a "range" at all, it's one data point that
-        // could be unusually high or low). At 4+ stores the live numbers
-        // are a more reliable signal than the AI estimate and take over.
-        const MIN_STORES_FOR_REAL_RANGE = 4;
-        if (withPrice.length >= MIN_STORES_FOR_REAL_RANGE) {
+        if (withPrice.length > 0) {
           const prices = withPrice.map((r) => r.price as number);
           const min = Math.min(...prices);
           const max = Math.max(...prices);
@@ -834,14 +823,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // from the real numbers so the text never contradicts the figures
           // shown above it.
           marketPrice.summary = {
-            ar: `بناءً على أسعار حقيقية من ${withPrice.length} متاجر تم فحصها الآن، يتراوح السعر بين ${Math.round(min).toLocaleString()} و${Math.round(max).toLocaleString()} ${currency}.`,
-            en: `Based on real prices just checked across ${withPrice.length} stores, the price ranges from ${Math.round(min).toLocaleString()} to ${Math.round(max).toLocaleString()} ${currency}.`,
+            ar: `بناءً على أسعار حقيقية من ${withPrice.length} ${withPrice.length === 1 ? "متجر" : "متاجر"} تم فحصها الآن، يتراوح السعر بين ${Math.round(min).toLocaleString()} و${Math.round(max).toLocaleString()} ${currency}.`,
+            en: `Based on real prices just checked across ${withPrice.length} store${withPrice.length === 1 ? "" : "s"}, the price ranges from ${Math.round(min).toLocaleString()} to ${Math.round(max).toLocaleString()} ${currency}.`,
           };
           console.log(`[/api/analyze] Real price range from ${withPrice.length} stores: ${min}-${max} (was AI estimate before override)`);
         } else {
-          console.warn(
-            `[/api/analyze] Only ${withPrice.length} store(s) resolved a real price (need ${MIN_STORES_FOR_REAL_RANGE}+) — keeping AI-estimated fair price range.`
-          );
+          console.warn("[/api/analyze] No store resolved a real price — keeping AI-estimated fair price range.");
         }
 
         // Product photo: prefer the cheapest resolved store's image, else
@@ -854,12 +841,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Merge the real price/stock/lastChecked data back into retailerPrices
         // so the "find the best price yourself" section can show real numbers
         // next to each store link instead of just a bare link.
-        //
-        // Links we could never confirm even open (source: "unreachable" —
-        // every fetch path came back empty) are dropped here rather than
-        // shown to the user: a link with no evidence it loads has no
-        // business being presented as somewhere to go check the price.
-        retailerPrices = resolved.filter((r) => r.source !== "unreachable");
+        retailerPrices = resolved;
       } catch (e) {
         console.error("[/api/analyze] Resolving live retailer prices failed (non-fatal, keeping AI-estimated range):", e);
       }

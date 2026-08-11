@@ -24,11 +24,10 @@ export interface SerperResult {
   rawContent: string | null;
 }
 
-// Qarari runs on subscriptions, not retailer affiliate/commission deals — so
-// there is no business reason to hide any store from the price comparison.
-// The whole point of the product is showing the customer every real store
-// that carries the item so they can find the cheapest price, regardless of
-// whether Qarari has any commercial relationship with that store.
+// Feature flag: only show a B.TECH card in the retailer price comparison
+// once we've confirmed an affiliate/commission deal with them. Toggle via
+// env var — no code change needed to flip it on later.
+export const SHOW_BTECH_COMPARISON = process.env.SHOW_BTECH_COMPARISON === "true";
 
 interface CountryRetailerMap {
   official: string;
@@ -38,10 +37,7 @@ interface CountryRetailerMap {
 const COUNTRY_RETAILERS: Record<string, CountryRetailerMap> = {
   EGP: {
     official: "site:apple.com OR site:samsung.com OR site:store.sony.com",
-    marketplace: [
-      "amazon.eg", "jumia.com.eg", "btech.com", "noon.com",
-      "2b.com.eg", "rayashop.com", "carrefouregypt.com", "compumarts.com", "dreameg.net",
-    ]
+    marketplace: ["amazon.eg", "jumia.com.eg", "btech.com", "noon.com"]
   },
   SAR: {
     official: "site:apple.com OR site:samsung.com",
@@ -641,11 +637,11 @@ const CURRENCY_GROQ_COUNTRY: Record<string, string> = {
 
 // Compound's own web-search tool is billed per search + per token, so unlike
 // the Serper domain lists (which just build display links and cost nothing
-// extra), we deliberately cap this to the top 3 marketplace domains for the
-// price range so the tool has a narrower, cheaper search surface instead of
-// fanning out across every marketplace. This cap is purely a cost control —
-// it does not hide any store from the UI (the full retailer list is always
-// shown; see fetchMainProductRetailerLinks).
+// extra), we deliberately cap this to the 3 stores that actually matter for
+// the price range — dropping btech.com (hidden from the UI behind
+// SHOW_BTECH_COMPARISON anyway, so there's no reason to pay for Compound to
+// search it) and capping at 3 domains total so the tool has a narrower,
+// cheaper search surface instead of fanning out across every marketplace.
 const COMPOUND_MAX_PRICE_DOMAINS = 3;
 
 // Helper that maps a retailer domain to a Groq `search_settings.include_domains`
@@ -659,10 +655,11 @@ function buildGroqSearchSettings(currency: string, condition: "new" | "likeNew" 
   const settings: Record<string, any> = {};
   if (country) settings.country = country;
   // For new-condition searches, restrict to the top 3 known marketplace
-  // domains so Groq's web search doesn't drift into unrelated blogs/forums
-  // AND doesn't burn tokens checking every single marketplace.
+  // domains (excluding btech, see comment above) so Groq's web search
+  // doesn't drift into unrelated blogs/forums AND doesn't burn tokens
+  // checking stores we don't even show a link for.
   if (condition === "new" && domains.length > 0) {
-    settings.include_domains = domains.slice(0, COMPOUND_MAX_PRICE_DOMAINS);
+    settings.include_domains = domains.filter((d) => d !== "btech.com").slice(0, COMPOUND_MAX_PRICE_DOMAINS);
   }
   return settings;
 }
@@ -1208,18 +1205,9 @@ async function fetchRetailerListings(
   const usedSites = USED_MARKETPLACES[currency] || USED_MARKETPLACES.USD;
   const qualifier = conditionQualifier(condition);
   const domains = condition === "new" ? retailers.marketplace : usedSites;
-
-  // One Serper query PER domain, run in parallel — not a single combined
-  // "(site:a OR site:b OR site:c)" query. A combined query only gets 10
-  // organic slots total, and Google's ranking crowds those slots with
-  // whichever single domain ranks highest for this query (almost always
-  // Amazon), so the other stores never surface at all even though they
-  // carry the product. Querying every domain separately guarantees each
-  // store gets its own dedicated shot at a hit.
-  const perDomainResults = await Promise.all(
-    domains.map((domain) => searchSerper(`${product} price ${currency} ${qualifier} site:${domain}`, region))
-  );
-  return perDomainResults.flat();
+  const siteQuery = domains.map((m) => `site:${m}`).join(" OR ");
+  const query = `${product} price ${currency} ${qualifier} (${siteQuery})`;
+  return searchSerper(query, region);
 }
 
 /**
@@ -1300,7 +1288,6 @@ function pickBroadRetailerLinks(
     links.push({
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain.replace(/^www\./, ""),
       url: r.url,
-      matched: true, // already passed matchesProduct() above
     });
     if (links.length >= maxLinks) break;
   }
@@ -1398,17 +1385,6 @@ export function attachSearchLinksToAlternatives(
 export interface RetailerLink {
   retailer: string;
   url: string;
-  // true  = Serper's own result title/snippet for this URL was checked
-  //         against the product's significant tokens and it's confirmed to
-  //         be THIS product's page.
-  // false = the link is real (came back from a live search hit) but its
-  //         title/snippet didn't match the exact product — most likely a
-  //         similar model / same-category alternative, not this exact item.
-  //         The UI must label these as "similar product", never show a
-  //         price next to them as if it were confirmed for the exact item.
-  // undefined = legacy path (buildRetailerSearchLinks last-resort fallback)
-  //         where no live hit exists at all — kept for backward compat only.
-  matched?: boolean;
 }
 
 // Friendly display names for each retailer domain.
@@ -1423,11 +1399,6 @@ const RETAILER_DISPLAY_NAMES: Record<string, string> = {
   "amazon.it": "Amazon",
   "noon.com": "Noon",
   "btech.com": "B.TECH",
-  "2b.com.eg": "2B",
-  "rayashop.com": "RayaShop",
-  "carrefouregypt.com": "Carrefour Egypt",
-  "compumarts.com": "Compumarts",
-  "dreameg.net": "Dream",
   "jarir.com": "Jarir",
   "extra.com": "Extra",
   "carrefour.ae": "Carrefour",
@@ -1462,11 +1433,6 @@ const RETAILER_SEARCH_URL_BUILDERS: Record<string, (q: string) => string> = {
   "amazon.it": (q) => `https://www.amazon.it/s?k=${encodeURIComponent(q)}`,
   "noon.com": (q) => `https://www.noon.com/egypt-en/search/?q=${encodeURIComponent(q)}`,
   "btech.com": (q) => `https://btech.com/en/catalogsearch/result/?q=${encodeURIComponent(q)}`,
-  "2b.com.eg": (q) => `https://2b.com.eg/en/catalogsearch/result/?q=${encodeURIComponent(q)}`,
-  "rayashop.com": (q) => `https://rayashop.com/catalogsearch/result/?q=${encodeURIComponent(q)}`,
-  "carrefouregypt.com": (q) => `https://www.carrefouregypt.com/mafeg/en/search?keyword=${encodeURIComponent(q)}`,
-  "compumarts.com": (q) => `https://compumarts.com/catalogsearch/result/?q=${encodeURIComponent(q)}`,
-  "dreameg.net": (q) => `https://www.dreameg.net/catalogsearch/result/?q=${encodeURIComponent(q)}`,
   "jarir.com": (q) => `https://www.jarir.com/sa-en/catalogsearch/result/?q=${encodeURIComponent(q)}`,
   "extra.com": (q) => `https://www.extra.com/en-sa/search/?q=${encodeURIComponent(q)}`,
   "carrefour.ae": (q) => `https://www.carrefouruae.com/mafuae/en/search?keyword=${encodeURIComponent(q)}`,
@@ -1508,14 +1474,11 @@ export function buildRetailerSearchLinks(
       ? (COUNTRY_RETAILERS[currency] || COUNTRY_RETAILERS.USD).marketplace
       : (USED_MARKETPLACES[currency] || USED_MARKETPLACES.USD);
 
-  return domains.map((domain) => ({
+  const visibleDomains = SHOW_BTECH_COMPARISON ? domains : domains.filter((d) => d !== "btech.com");
+
+  return visibleDomains.map((domain) => ({
     retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
     url: buildStoreSearchUrl(domain, product),
-    // This is a constructed in-site SEARCH page, not a link to any specific
-    // product — only ever used when Serper returned literally nothing for
-    // this product (see fetchMainProductRetailerLinks). matched: false so
-    // the UI never presents it as a confirmed product page.
-    matched: false,
   }));
 }
 
@@ -1530,19 +1493,9 @@ function urlDomain(url: string): string {
 /**
  * Picks a direct link to the actual first listing Serper found for each
  * target retailer domain, using Serper results already fetched for a
- * marketplace-scoped query (no extra API call).
- *
- * A domain only makes it into the returned list if Serper actually returned
- * a real hit for it — we never fabricate a store-search/listing URL and
- * present it as if it were the product's own page (that used to happen via
- * buildStoreSearchUrl here; it's been removed). A store we found nothing
- * for is simply omitted rather than shown with a fake "search page" link
- * that isn't guaranteed to open, let alone show the right item.
- *
- * Each surviving hit is also checked against the product's significant
- * tokens (same whole-word matcher pickBroadRetailerLinks uses) and tagged
- * `matched: true/false` so the UI can tell a confirmed exact-product page
- * apart from a same-domain hit that's actually a similar/alternate model.
+ * marketplace-scoped query (no extra API call). Falls back to that store's
+ * own search-results page only for a domain Serper genuinely returned
+ * nothing for, so a link is always shown but never a fabricated one.
  */
 export function pickDirectRetailerLinks(
   serperResults: SerperResult[],
@@ -1555,17 +1508,13 @@ export function pickDirectRetailerLinks(
       ? (COUNTRY_RETAILERS[currency] || COUNTRY_RETAILERS.USD).marketplace
       : (USED_MARKETPLACES[currency] || USED_MARKETPLACES.USD);
 
-  const tokens = getSignificantTokens(product);
+  const visibleDomains = SHOW_BTECH_COMPARISON ? domains : domains.filter((d) => d !== "btech.com");
 
-  const links: RetailerLink[] = [];
-  for (const domain of domains) {
+  return visibleDomains.map((domain) => {
     const hit = serperResults.find((r) => urlDomain(r.url).endsWith(domain));
-    if (!hit) continue; // no real hit for this store — omit it, never fabricate a link
-    links.push({
+    return {
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
-      url: hit.url,
-      matched: matchesProduct(`${hit.title} ${hit.content}`, tokens),
-    });
-  }
-  return links;
+      url: hit ? hit.url : buildStoreSearchUrl(domain, product),
+    };
+  });
 }

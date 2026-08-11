@@ -38,19 +38,7 @@ export interface ResolvedStorePrice {
   inStock: boolean | null; // null = couldn't determine
   imageUrl: string | null; // product photo, when the page's own JSON-LD/meta has one — never AI-generated
   lastChecked: string; // ISO timestamp
-  // "unresolved"  = the page DID load (we have real HTML/text from it) but
-  //                 no price could be confidently extracted off it.
-  // "unreachable" = the link never returned any usable content at all,
-  //                 across every fetch path we tried (plain fetch + retry +
-  //                 reader-proxy). Callers should drop these from what's
-  //                 shown to the user — a link we can't confirm even opens
-  //                 has no business being presented as a place to check the
-  //                 price.
-  source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "unresolved" | "unreachable";
-  // Carried over from RetailerLink.matched (see _groq_tavily.ts) — whether
-  // this URL was confirmed to be THIS exact product's page vs. a same-
-  // domain hit that looked like a similar/alternative item.
-  matched?: boolean;
+  source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "unresolved";
 }
 
 const FETCH_TIMEOUT_MS = 6000;
@@ -451,7 +439,7 @@ async function extractViaAi(html: string, retailer: string, currency: string): P
 
 async function resolveOneInner(link: RetailerLink, currency: string, preferReaderProxy: boolean): Promise<ResolvedStorePrice> {
   const lastChecked = new Date().toISOString();
-  const base = { retailer: link.retailer, url: link.url, currency, lastChecked, matched: link.matched };
+  const base = { retailer: link.retailer, url: link.url, currency, lastChecked };
 
   // Domains with a known-poor plain-fetch success rate (see
   // _domainHealth.ts — loaded from cumulative history, not a guess) skip
@@ -496,15 +484,8 @@ async function resolveOneInner(link: RetailerLink, currency: string, preferReade
       if (renderedAi) {
         return { ...base, price: renderedAi.price, inStock: renderedAi.inStock, imageUrl: null, source: "ai-rendered" };
       }
-      // Reader proxy DID return content but no price could be read off it —
-      // the page is reachable, just not price-extractable.
-      return { ...base, price: null, inStock: null, imageUrl: null, source: "unresolved" };
     }
-    // Every fetch path (plain fetch + retry + reader-proxy) came back with
-    // nothing at all — we cannot even confirm this link opens. Distinct
-    // from "unresolved" so callers can drop it rather than show a link
-    // that's never actually been proven to load.
-    return { ...base, price: null, inStock: null, imageUrl: null, source: "unreachable" };
+    return { ...base, price: null, inStock: null, imageUrl: null, source: "unresolved" };
   }
 
   // Image extraction is independent of which price path below succeeds —
@@ -555,10 +536,7 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
     inStock: null,
     imageUrl: null,
     lastChecked: new Date().toISOString(),
-    // Hit the hard cap before anything came back — same as never getting
-    // usable content, so treat it the same as "unreachable" downstream.
-    source: "unreachable",
-    matched: link.matched,
+    source: "unresolved",
   };
   return Promise.race([
     resolveOneInner(link, currency, preferReaderProxy),
@@ -569,16 +547,17 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
 }
 
 // Ceiling on how many retailer links get their price actually resolved.
-// fetchMainProductRetailerLinks() can return up to ~17 links once the
-// broad-discovery links are added on top of the fixed marketplace domains
-// (9 fixed for EGP + up to 8 broad-discovery extras). The whole point of
-// this product is showing the customer EVERY real store that carries the
-// item so they can find the cheapest price — silently dropping stores past
-// an arbitrary cutoff directly undermines that, so this cap exists only to
-// bound worst-case concurrency/cost, not to hide legitimate stores. Set
-// high enough that it should essentially never actually trim a real result
-// in practice.
-const MAX_LINKS_TO_RESOLVE = 20;
+// fetchMainProductRetailerLinks() can return up to ~12 links once the
+// broad-discovery links are added on top of the fixed ones — resolving
+// every one of those doesn't make the whole call any slower (they're all
+// parallel, still bounded by PER_LINK_HARD_CAP_MS), but it does mean up to
+// 12 concurrent outbound fetches (plus possible AI-fallback calls) fired
+// from a single serverless invocation, which costs more and adds
+// connection-setup overhead for diminishing returns past a handful of
+// stores. The fixed, most-reliable links always come first in the input
+// array, so slicing keeps those and only trims the long tail of broad-
+// discovery extras.
+const MAX_LINKS_TO_RESOLVE = 8;
 
 /**
  * Resolves real prices for every given retailer link, in parallel.
@@ -606,8 +585,7 @@ export async function resolvePricesForLinks(
           inStock: null,
           imageUrl: null,
           lastChecked: new Date().toISOString(),
-          source: "unreachable" as const,
-          matched: capped[i].matched,
+          source: "unresolved" as const,
         }
   );
 }

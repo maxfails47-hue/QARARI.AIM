@@ -74,11 +74,6 @@ interface AnalysisResultBase {
     currency?: string;
     inStock?: boolean | null;
     lastChecked?: string;
-    // false = this URL is a real, reachable page but Serper's own snippet
-    // for it didn't match the exact product — treat as a similar item /
-    // same-category alternative, never as a confirmed price for the exact
-    // product. Undefined/true = confirmed match (or legacy data).
-    matched?: boolean;
   }[];
   productImage?: string | null;
   createdAt: number;
@@ -126,11 +121,10 @@ export interface EvaluateResult extends AnalysisResultBase {
 // they only exist on the EvaluateResult branch.
 export type AnalysisResult = FindPriceResult | EvaluateResult;
 
-// Qarari runs on subscriptions, not retailer affiliate/commission deals —
-// every store that carries the product is shown, with no gating by
-// commercial relationship. (Previously this held a SHOW_BTECH_COMPARISON
-// flag that hid B.TECH pending an affiliate deal; removed since that's not
-// how this product makes money.)
+// Feature flag mirroring api/_groq_tavily.ts's SHOW_BTECH_COMPARISON — flip
+// this once a B.TECH affiliate/commission deal is confirmed. Kept as a
+// simple constant since the frontend can't read server env vars directly.
+export const SHOW_BTECH_COMPARISON = false;
 
 export interface UserProfile {
   id: string;

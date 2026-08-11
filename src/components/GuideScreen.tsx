@@ -19,8 +19,8 @@ export function GuideScreen() {
       descEn: "Ask the advisor anything about shopping and get personalized advice",
     },
     {
-      titleAr: "💬 80 رسالة شهريًا (بريميوم)",
-      titleEn: "💬 80 Messages/Month (Premium)",
+      titleAr: "💬 150 رسالة شهريًا (بريميوم)",
+      titleEn: "💬 150 Messages/Month (Premium)",
       descAr: "تحدث مع المساعد وهو يتذكر اهتماماتك",
       descEn: "Chat with the advisor who remembers your interests",
     },
