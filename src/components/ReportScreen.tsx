@@ -32,7 +32,14 @@ function RetailerSearchLinks({
 
   if (visibleLinks.length < 1) return null;
 
-  const cheapestPrice = visibleLinks.reduce<number | null>((min, rp) => {
+  // Smart sorting: stores with a real verified price float to the top
+  // ("أفضل الأسعار المتاحة"); stores whose price we couldn't read (store
+  // protection, e.g. Amazon/Noon) are separated into their own section
+  // ("متاجر تتطلب زيارة الموقع") so the primary list stays clean.
+  const pricedLinks = visibleLinks.filter((rp) => typeof rp.price === "number");
+  const unpricedLinks = visibleLinks.filter((rp) => typeof rp.price !== "number");
+
+  const cheapestPrice = pricedLinks.reduce<number | null>((min, rp) => {
     if (typeof rp.price !== "number") return min;
     return min === null ? rp.price : Math.min(min, rp.price);
   }, null);
@@ -41,68 +48,100 @@ function RetailerSearchLinks({
     <div className="mb-4 rounded-xl border border-amber-500/15 bg-[#0B0B0F] p-5">
       <h2 className="flex items-center gap-2 font-serif text-lg font-bold text-amber-400">
         <ShoppingCart className="h-5 w-5" />
-        {lang === "ar" ? "دور على أفضل سعر بنفسك" : "Find the best price yourself"}
+        {lang === "ar" ? "مقارنة أسعار المتاجر" : "Compare store prices"}
       </h2>
       <p className="mt-1 mb-4 text-xs text-zinc-500">
         {lang === "ar"
-          ? "الأسعار دي حقيقية اتقرت من صفحات المتاجر نفسها دلوقتي، مش تقدير — بس ينفع تتغير قبل ما تدوس اشتري."
-          : "These prices were read live from each store's own page just now — not an estimate — but they can still change before checkout."}
+          ? "عرضنا لك الأسعار المتاحة فوراً، وجمعنا لك المتاجر الكبرى في روابط سريعة للتحقق من أحدث العروض."
+          : "We show you the prices available instantly, and gathered the major stores into quick links to check the latest deals."}
       </p>
 
-      <div className="space-y-2.5">
-        {visibleLinks.map((rp, i) => {
-          const hasPrice = typeof rp.price === "number";
-          const isCheapest = hasPrice && cheapestPrice !== null && rp.price === cheapestPrice;
-          return (
-            <a
-              key={i}
-              href={rp.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`flex items-center justify-between rounded-xl border p-3.5 transition-colors ${
-                isCheapest ? "border-amber-400/50 bg-amber-500/10" : "border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800/70"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
-                  {rp.retailer.slice(0, 2).toUpperCase()}
-                </span>
-                <div>
-                  <span className="flex items-center gap-1.5 text-sm font-bold text-zinc-100">
-                    {rp.retailer}
-                    {isCheapest && (
-                      <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold text-[#0B0B0F]">
-                        {lang === "ar" ? "الأرخص" : "Cheapest"}
+      {pricedLinks.length > 0 && (
+        <>
+          <h3 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-zinc-500">
+            {lang === "ar" ? "أفضل الأسعار المتاحة" : "Best available prices"}
+          </h3>
+          <div className="space-y-2.5">
+            {pricedLinks.map((rp, i) => {
+              const isCheapest = cheapestPrice !== null && rp.price === cheapestPrice;
+              return (
+                <a
+                  key={i}
+                  href={rp.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center justify-between rounded-xl border p-3.5 transition-colors ${
+                    isCheapest ? "border-amber-400/50 bg-amber-500/10" : "border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800/70"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
+                      {rp.retailer.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div>
+                      <span className="flex items-center gap-1.5 text-sm font-bold text-zinc-100">
+                        {rp.retailer}
+                        {isCheapest && (
+                          <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold text-[#0B0B0F]">
+                            {lang === "ar" ? "الأرخص" : "Cheapest"}
+                          </span>
+                        )}
                       </span>
-                    )}
+                      <span className="block text-xs text-zinc-500">
+                        {rp.inStock === false
+                          ? lang === "ar" ? "غير متوفر حاليًا" : "Currently out of stock"
+                          : lang === "ar" ? "متوفر" : "In stock"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-end">
+                    <p className="font-bold text-zinc-100">{Math.round(rp.price as number).toLocaleString()} {rp.currency}</p>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {unpricedLinks.length > 0 && (
+        <>
+          <div className={`flex items-center gap-2 ${pricedLinks.length > 0 ? "mt-5" : ""} mb-2.5`}>
+            <span className="h-px flex-1 bg-zinc-700/60" />
+            <h3 className="text-xs font-bold uppercase tracking-wide text-zinc-500">
+              {lang === "ar" ? "متاجر تتطلب زيارة الموقع" : "Stores that require a site visit"}
+            </h3>
+            <span className="h-px flex-1 bg-zinc-700/60" />
+          </div>
+          <div className="space-y-2.5">
+            {unpricedLinks.map((rp, i) => (
+              <a
+                key={i}
+                href={rp.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-800/40 p-3.5 transition-colors hover:bg-zinc-800/70"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
+                    {rp.retailer.slice(0, 2).toUpperCase()}
                   </span>
-                  <span className="block text-xs text-zinc-500">
-                    {hasPrice
-                      ? rp.inStock === false
-                        ? lang === "ar" ? "غير متوفر حاليًا" : "Currently out of stock"
-                        : lang === "ar" ? "متوفر" : "In stock"
-                      : lang === "ar"
-                        ? "السعر مش ظاهر أوتوماتيك (حماية من المتجر) — افتح الرابط"
-                        : "Price not shown automatically (store protection) — open the link"}
-                  </span>
+                  <span className="truncate text-sm font-bold text-zinc-100">{rp.retailer}</span>
                 </div>
-              </div>
-              {hasPrice ? (
-                <div className="text-end">
-                  <p className="font-bold text-zinc-100">{Math.round(rp.price as number).toLocaleString()} {rp.currency}</p>
-                </div>
-              ) : (
-                <ExternalLink className="h-4 w-4 shrink-0 text-zinc-500" />
-              )}
-            </a>
-          );
-        })}
-      </div>
+                <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-400 px-3.5 py-2 text-xs font-bold text-[#0B0B0F] transition-colors hover:bg-amber-300">
+                  {lang === "ar" ? "عرض السعر في المتجر" : "View price in store"}
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </span>
+              </a>
+            ))}
+          </div>
+        </>
+      )}
 
       <p className="mt-3.5 text-[11px] leading-relaxed text-zinc-500">
         {lang === "ar"
-          ? "كل لينك بيوديك مباشرة لأول منتج فعلي لقيناه في نتائج البحث بالمتجر ده — مش صفحة بحث عامة. لو معرفناش نقرا السعر حيًا من صفحة المتجر، بنورّيك اللينك برضه من غير رقم بدل ما نخمّن. بعض الروابط شراكة تجارية، وده مش بيأثر على ترتيب أو تقييم 'قرار' للصفقة."
-          : "Each link takes you straight to the actual first product we found in that store's search results — not a generic search page. If we couldn't read a live price off the store's page, we still show the link without a number rather than guess. Some links are commercial partnerships; this doesn't affect Qarari's ranking or rating of the deal."}
+          ? "جميع الروابط موجهة لأول منتج مطابق في بحث المتجر."
+          : "All links point to the first matching product in the store's search."}
       </p>
     </div>
   );

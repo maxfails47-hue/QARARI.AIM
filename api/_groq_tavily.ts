@@ -1,6 +1,7 @@
 import { logStep, logEnvPresence, loggedFetch, loggedJsonParse } from "./_logger.js";
 import { computeMarketPriceRange, isSupportedCurrency, getSignificantTokens, matchesProduct, type SupportedCurrency } from "./_priceExtraction.js";
 import { getFairPriceRangeViaGemini, callAnalysisModelViaGemini } from "./_gemini.js";
+import { cleanAndVerifyUrl } from "./_urlValidator.js";
 
 const PRIMARY_MODEL = "openai/gpt-oss-120b";
 const FALLBACK_MODEL = "openai/gpt-oss-20b";
@@ -1284,10 +1285,16 @@ function pickBroadRetailerLinks(
     if (!domain || isLikelyNonRetailer(domain) || seenDomains.has(domain)) continue;
     if (!matchesProduct(`${r.title} ${r.content}`, tokens)) continue;
 
+    // Broad/unrestricted search has no known-good URL pattern to fall back
+    // on for these domains, so a link that isn't a real product page is
+    // dropped entirely rather than shown as a misleading "direct" link.
+    const verifiedUrl = cleanAndVerifyUrl(r.url, undefined, product);
+    if (!verifiedUrl) continue;
+
     seenDomains.add(domain);
     links.push({
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain.replace(/^www\./, ""),
-      url: r.url,
+      url: verifiedUrl,
     });
     if (links.length >= maxLinks) break;
   }
@@ -1512,9 +1519,14 @@ export function pickDirectRetailerLinks(
 
   return visibleDomains.map((domain) => {
     const hit = serperResults.find((r) => urlDomain(r.url).endsWith(domain));
+    // A "hit" is only usable as a direct link if it's actually a single
+    // product page (not a search/category/collection page Serper happened
+    // to surface). If it fails that check, fall back to the store's own
+    // search URL — never a fabricated product link.
+    const verifiedUrl = hit ? cleanAndVerifyUrl(hit.url, undefined, product) : null;
     return {
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
-      url: hit ? hit.url : buildStoreSearchUrl(domain, product),
+      url: verifiedUrl || buildStoreSearchUrl(domain, product),
     };
   });
 }

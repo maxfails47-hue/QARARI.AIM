@@ -1,3 +1,5 @@
+import { extractAndValidateEGPPrice } from "./_priceValidator.js";
+
 export const SUPPORTED_CURRENCIES = ["USD", "EGP", "SAR", "AED", "KWD", "EUR", "GBP", "QAR", "BHD", "OMR", "JOD"] as const;
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
 
@@ -138,6 +140,15 @@ export function extractPrices(text: string, title: string, url: string, conditio
   const numRegex = /\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?/g;
   let match;
 
+  // Extra confirmation pass for EGP specifically — Serper snippets for
+  // Egyptian listings are the most common source of currency mix-ups
+  // (adjacent SAR/AED/USD prices, installment figures, storage-size
+  // numbers mistaken for money). If this text doesn't survive the
+  // stricter EGP-only check, don't trust any "EGP" currency match found
+  // below for this result — every other currency is unaffected.
+  const egpCheck = extractAndValidateEGPPrice(`${title} ${text}`, productName);
+  const egpConfirmed = egpCheck.priceStatus === "VERIFIED";
+
   while ((match = numRegex.exec(normalizedText)) !== null) {
     const val = parseFloat(match[0].replace(/[,\s]/g, ""));
     if (val < 10 || val > 20_000_000) continue;
@@ -156,7 +167,13 @@ export function extractPrices(text: string, title: string, url: string, conditio
     // wants a NEW unit — otherwise those are the correct matches to keep.
     const isWrongCondition = condition === "new" && (CONDITION_INDICATOR_KEYWORDS.test(window) || CONDITION_INDICATOR_KEYWORDS.test(title));
 
-    if (currency && !isNoise && !isWrongCondition) {
+    // An EGP-flagged match only counts if the stricter EGP-only pass also
+    // confirms this text as a genuine, single-currency EGP price — this
+    // is what catches comparison tables/installment text that the
+    // looser window-based currency regex above would otherwise accept.
+    const isUnconfirmedEgp = currency === "EGP" && !egpConfirmed;
+
+    if (currency && !isNoise && !isWrongCondition && !isUnconfirmedEgp) {
       const weight = getTrustWeight(url);
       prices.push({ value: val, currency, url, title, weight });
     }
