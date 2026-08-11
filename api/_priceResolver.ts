@@ -38,12 +38,7 @@ export interface ResolvedStorePrice {
   inStock: boolean | null; // null = couldn't determine
   imageUrl: string | null; // product photo, when the page's own JSON-LD/meta has one — never AI-generated
   lastChecked: string; // ISO timestamp
-  source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "unresolved";
-  // Carried straight through from the input RetailerLink — whether `url` is
-  // a verified product page vs a plain store-search fallback. Independent
-  // of `price`: a direct product page can still resolve price: null (store
-  // blocks scraping), and that must NOT be confused with the fallback case.
-  isDirectProduct: boolean;
+  source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "shopping" | "unresolved";
 }
 
 const FETCH_TIMEOUT_MS = 6000;
@@ -65,6 +60,12 @@ const READER_PROXY_TIMEOUT_MS = 7000;
 // of a fair timeout of its own.
 const PER_LINK_HARD_CAP_MS = 13500;
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
+// Deliberately short — used only for the best-effort image grab that rides
+// alongside a Shopping-sourced price (see resolveOneInner tier 0 below). We
+// already have the price from Shopping by that point, so this fetch is pure
+// upside: if the page doesn't answer fast, we just skip the image, never
+// block on it.
+const IMAGE_ONLY_TIMEOUT_MS = 3000;
 
 // Rotating pool of realistic desktop UAs. Some retailer sites fingerprint
 // on UA alone (or keep a blocklist keyed to the single most common
@@ -444,8 +445,52 @@ async function extractViaAi(html: string, retailer: string, currency: string): P
 
 async function resolveOneInner(link: RetailerLink, currency: string, preferReaderProxy: boolean): Promise<ResolvedStorePrice> {
   const lastChecked = new Date().toISOString();
-  const base = { retailer: link.retailer, url: link.url, currency, lastChecked, isDirectProduct: link.isDirectProduct };
+  const base = { retailer: link.retailer, url: link.url, currency, lastChecked };
 
+  // ─── TIER 0 (per product decision — Shopping is now PRIMARY, not a
+  // fallback): live-page reading below has a real, recurring failure rate
+  // in production (WAF/bot-challenge blocks, JS-only rendering that even
+  // the reader-proxy tier can't always beat, plain timeouts) — Google
+  // Shopping's price came straight from the store's own feed to Google, so
+  // when we have it, use it immediately instead of gambling on the page
+  // read succeeding at all. Still worth ONE cheap, short-timeout fetch
+  // alongside it purely for the product image + stock flag (JSON-LD/meta
+  // only — no AI call, no retry): if that doesn't answer in
+  // IMAGE_ONLY_TIMEOUT_MS, we skip it and return the Shopping price alone
+  // rather than let a slow page hold up an already-known price.
+  if (typeof link.shoppingPrice === "number" && link.shoppingPrice > 0) {
+    // Prefer the image Google Shopping already gave us for this exact
+    // listing — zero extra network calls, and more reliable than hoping
+    // the store's own page answers fast enough (see fallback below).
+    if (link.shoppingImageUrl) {
+      return {
+        ...base,
+        price: link.shoppingPrice,
+        inStock: null,
+        imageUrl: link.shoppingImageUrl,
+        source: "shopping",
+      };
+    }
+    // Shopping had a price but no image for this hit — worth one cheap,
+    // short-timeout fetch (JSON-LD/meta only, no AI, no retry) purely for
+    // the image: if it doesn't answer in IMAGE_ONLY_TIMEOUT_MS we skip it
+    // and return the Shopping price with no image, rather than let a slow
+    // page hold up an already-known price.
+    const quickHtml = await fetchOnce(link.url, UA_POOL[0], IMAGE_ONLY_TIMEOUT_MS);
+    const imageUrl = quickHtml ? extractImage(quickHtml, link.url) : null;
+    const quickJsonld = quickHtml && !looksLikeBlockPage(quickHtml) ? extractFromJsonLd(quickHtml) : null;
+    return {
+      ...base,
+      price: link.shoppingPrice,
+      inStock: quickJsonld?.inStock ?? null,
+      imageUrl,
+      source: "shopping",
+    };
+  }
+
+  // ─── TIER 1+ (fallback — only reached when Shopping had no price for
+  // this domain): the existing live-page read chain below, unchanged.
+  //
   // Domains with a known-poor plain-fetch success rate (see
   // _domainHealth.ts — loaded from cumulative history, not a guess) skip
   // straight to the reader-proxy tier first. This doesn't touch the
@@ -542,7 +587,6 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
     imageUrl: null,
     lastChecked: new Date().toISOString(),
     source: "unresolved",
-    isDirectProduct: link.isDirectProduct,
   };
   return Promise.race([
     resolveOneInner(link, currency, preferReaderProxy),
@@ -592,7 +636,6 @@ export async function resolvePricesForLinks(
           imageUrl: null,
           lastChecked: new Date().toISOString(),
           source: "unresolved" as const,
-          isDirectProduct: capped[i].isDirectProduct,
         }
   );
 }

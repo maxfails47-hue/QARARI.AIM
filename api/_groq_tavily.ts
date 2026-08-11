@@ -1,7 +1,6 @@
 import { logStep, logEnvPresence, loggedFetch, loggedJsonParse } from "./_logger.js";
 import { computeMarketPriceRange, isSupportedCurrency, getSignificantTokens, matchesProduct, type SupportedCurrency } from "./_priceExtraction.js";
 import { getFairPriceRangeViaGemini, callAnalysisModelViaGemini } from "./_gemini.js";
-import { cleanAndVerifyUrl } from "./_urlValidator.js";
 
 const PRIMARY_MODEL = "openai/gpt-oss-120b";
 const FALLBACK_MODEL = "openai/gpt-oss-20b";
@@ -103,6 +102,75 @@ async function searchSerper(query: string, opts: { gl?: string; hl?: string } = 
     console.error("[Serper] Error:", error);
     return [];
   }
+}
+
+// Google Shopping results via Serper's /shopping endpoint — separate from
+// searchSerper() (organic /search) above. Shopping results carry a
+// merchant name + direct product link + a live listed price straight from
+// Google's shopping graph, which surfaces stores organic search snippets
+// often miss entirely (many retailers feed Google Shopping a product feed
+// even when their own pages are hard to crawl/scrape).
+//
+// IMPORTANT — scope: this is used ONLY to discover extra candidate
+// retailer LINKS for the "find the best price yourself" section
+// (fetchMainProductRetailerLinks below). It never feeds computeMarketPriceRange,
+// getFairPriceRangeViaCompound, or getFairPriceRangeViaSerperFallback — the
+// Fair Price (السعر العادل) pipeline is untouched by this function, same as
+// the existing organic-search retailer discovery calls it sits next to.
+export interface ShoppingResult {
+  title: string;
+  url: string;
+  price: number | null;
+  merchant: string;
+  imageUrl: string | null;
+}
+
+async function searchSerperShopping(query: string, opts: { gl?: string; hl?: string } = {}): Promise<ShoppingResult[]> {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) return [];
+
+  try {
+    const res = await loggedFetch("serper.shopping", "https://google.serper.dev/shopping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": apiKey },
+      body: JSON.stringify({
+        q: query,
+        num: 10,
+        ...(opts.gl ? { gl: opts.gl } : {}),
+        ...(opts.hl ? { hl: opts.hl } : {}),
+      }),
+    });
+
+    if (!res.ok) return [];
+    const json = await res.json();
+    const shopping = Array.isArray(json?.shopping) ? json.shopping : [];
+    return shopping.map((r: any) => ({
+      title: r.title || "",
+      url: r.link || r.productLink || "",
+      price: typeof r.price === "number" ? r.price : parsePriceLoose(r.price),
+      merchant: r.source || r.merchant || "",
+      // Serper's /shopping endpoint returns this straight from Google's
+      // shopping graph — same feed the price comes from, so it's available
+      // with zero extra network calls (unlike scraping og:image off the
+      // store's own page, which needs to open the page at all).
+      imageUrl: typeof r.imageUrl === "string" && r.imageUrl ? r.imageUrl : null,
+    })).filter((r: ShoppingResult) => !!r.url);
+  } catch (error) {
+    console.error("[Serper] Shopping error:", error);
+    return [];
+  }
+}
+
+// Serper's shopping "price" field is sometimes a formatted string
+// ("EGP 12,499.00") rather than a number — this is a best-effort parse used
+// only to decide relevance/ordering of discovered links, never as the price
+// shown to the user (that always comes from _priceResolver's live page read).
+function parsePriceLoose(value: unknown): number | null {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const num = parseFloat(cleaned);
+  return Number.isFinite(num) ? num : null;
 }
 
 function extractTargetCurrency(prompt: string): string | null {
@@ -1247,7 +1315,8 @@ async function fetchBroadListings(
   product: string,
   currency: string,
   region: { gl: string; hl: string },
-  condition: "new" | "likeNew" | "used"
+  condition: "new" | "likeNew" | "used",
+  arabicProduct: string = ""
 ): Promise<SerperResult[]> {
   const qualifier = conditionQualifier(condition);
   const official = (COUNTRY_RETAILERS[currency] || COUNTRY_RETAILERS.USD).official;
@@ -1255,11 +1324,25 @@ async function fetchBroadListings(
   const generalQuery = `${product} price ${currency} ${qualifier} buy`.trim();
   const officialQuery = `${product} price ${currency} (${official})`;
 
-  const [general, brand] = await Promise.all([
+  const calls = [
     searchSerper(generalQuery, region),
     searchSerper(officialQuery, region),
-  ]);
-  return [...general, ...brand];
+  ];
+
+  // Bilingual pass: local stores that only translate their storefront to
+  // Arabic (common for pharmacy/beauty/grocery chains, less so for big
+  // electronics marketplaces) are invisible to an English-only query even
+  // with gl/hl region hints — Serper still ranks by the literal query text.
+  // Only fires when the raw input actually had Arabic AND differs from the
+  // normalized English search term, so this never doubles up work for an
+  // already-English product name.
+  if (arabicProduct && containsArabic(arabicProduct)) {
+    const arabicQuery = `${arabicProduct} السعر ${currency}`.trim();
+    calls.push(searchSerper(arabicQuery, region));
+  }
+
+  const resultSets = await Promise.all(calls);
+  return resultSets.flat();
 }
 
 /**
@@ -1285,17 +1368,10 @@ function pickBroadRetailerLinks(
     if (!domain || isLikelyNonRetailer(domain) || seenDomains.has(domain)) continue;
     if (!matchesProduct(`${r.title} ${r.content}`, tokens)) continue;
 
-    // Broad/unrestricted search has no known-good URL pattern to fall back
-    // on for these domains, so a link that isn't a real product page is
-    // dropped entirely rather than shown as a misleading "direct" link.
-    const verifiedUrl = cleanAndVerifyUrl(r.url, undefined, product);
-    if (!verifiedUrl) continue;
-
     seenDomains.add(domain);
     links.push({
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain.replace(/^www\./, ""),
-      url: verifiedUrl,
-      isDirectProduct: true,
+      url: r.url,
     });
     if (links.length >= maxLinks) break;
   }
@@ -1303,12 +1379,80 @@ function pickBroadRetailerLinks(
 }
 
 /**
- * One-call helper for the main product: combines the reliable, known-domain
- * links (Amazon/Noon/Jumia/B.TECH etc. — direct listing picked from a
- * site-restricted search) with a broad, unrestricted search that can surface
- * ANY other store actually carrying the exact product (an official brand
- * site, a specialized category store, a local chain — whatever's really out
- * there), then de-duplicates by domain so the same store never appears
+ * Builds a domain -> best shopping price map from ALL shopping results that
+ * actually match the product (not just the ones that end up as their own
+ * discovered link) — used to attach a fallback price to links found via
+ * OTHER tiers too. If a domain shows up more than once, keeps the lowest
+ * price (Shopping listings for the same store are usually the same SKU with
+ * a shipping/bundle variation, and the lower one is the more representative
+ * base price).
+ */
+/**
+ * Builds a domain -> best shopping hit map (price + image) from ALL
+ * shopping results that actually match the product (not just the ones that
+ * end up as their own discovered link) — used to attach price/image data to
+ * links found via OTHER tiers too. If a domain shows up more than once,
+ * keeps the lowest price (Shopping listings for the same store are usually
+ * the same SKU with a shipping/bundle variation, and the lower one is the
+ * more representative base price).
+ */
+function buildShoppingDataMap(results: ShoppingResult[], product: string): Map<string, { price: number; imageUrl: string | null }> {
+  const tokens = getSignificantTokens(product);
+  const map = new Map<string, { price: number; imageUrl: string | null }>();
+  for (const r of results) {
+    if (!r.url || typeof r.price !== "number" || r.price <= 0) continue;
+    if (!matchesProduct(r.title, tokens)) continue;
+    const domain = urlDomain(r.url);
+    if (!domain) continue;
+    const existing = map.get(domain);
+    if (existing === undefined || r.price < existing.price) map.set(domain, { price: r.price, imageUrl: r.imageUrl });
+  }
+  return map;
+}
+
+/**
+ * Same idea as pickBroadRetailerLinks but for Google Shopping hits: title
+ * text is what's matched against the product tokens (shopping listings
+ * don't carry a snippet/content field the way organic results do).
+ */
+function pickShoppingRetailerLinks(
+  results: ShoppingResult[],
+  product: string,
+  seenDomains: Set<string>,
+  maxLinks: number
+): RetailerLink[] {
+  const tokens = getSignificantTokens(product);
+  const links: RetailerLink[] = [];
+
+  for (const r of results) {
+    if (!r.url) continue;
+    const domain = urlDomain(r.url);
+    if (!domain || isLikelyNonRetailer(domain) || seenDomains.has(domain)) continue;
+    if (!matchesProduct(r.title, tokens)) continue;
+
+    seenDomains.add(domain);
+    links.push({
+      retailer: RETAILER_DISPLAY_NAMES[domain] || r.merchant || domain.replace(/^www\./, ""),
+      url: r.url,
+    });
+    if (links.length >= maxLinks) break;
+  }
+  return links;
+}
+
+/**
+ * One-call helper for the main product: combines three tiers of links, in
+ * priority order (matters because only the first ~8 survive resolution —
+ * see MAX_LINKS_TO_RESOLVE in _priceResolver.ts):
+ *   1. Reliable, known-domain links (Amazon/Noon/Jumia/B.TECH etc. — direct
+ *      listing picked from a site-restricted search).
+ *   2. Google Shopping hits (each store's own product feed to Google — more
+ *      trustworthy than a generic web hit, so it outranks tier 3).
+ *   3. A broad, unrestricted search that can surface ANY other store
+ *      actually carrying the exact product (an official brand site, a
+ *      specialized category store, a local chain — whatever's really out
+ *      there).
+ * De-duplicates by domain across all three so the same store never appears
  * twice. Falls back to plain store-search links only when Serper genuinely
  * returns nothing at all.
  */
@@ -1321,21 +1465,54 @@ export async function fetchMainProductRetailerLinks(
     const searchProduct = await normalizeProductNameForSearch(product);
     const region = getRegionForCurrency(currency);
 
-    const [fixedResults, broadResults] = await Promise.all([
+    const [fixedResults, broadResults, shoppingResults] = await Promise.all([
       fetchRetailerListings(searchProduct, currency, region, condition),
-      fetchBroadListings(searchProduct, currency, region, condition),
+      fetchBroadListings(searchProduct, currency, region, condition, product),
+      searchSerperShopping(`${searchProduct} ${currency}`, region),
     ]);
 
     const fixedLinks = pickDirectRetailerLinks(fixedResults, searchProduct, currency, condition);
     const seenDomains = new Set(fixedLinks.map((l) => urlDomain(l.url)));
+
+    // Google Shopping comes right after the known-reliable fixed domains and
+    // BEFORE the broad/unrestricted web search — not last. Shopping listings
+    // come from each store's own product feed to Google, so they're closer
+    // to "this store really sells it" than a generic organic-search hit
+    // (which can just as easily be a review article or price-comparison
+    // page). Priority matters because resolvePricesForLinks() only resolves
+    // the first MAX_LINKS_TO_RESOLVE (8) links it's given — putting Shopping
+    // last meant it almost always got truncated away by the fixed+broad
+    // links alone, so it never actually contributed a resolved price.
+    const shoppingLinks = pickShoppingRetailerLinks(shoppingResults, searchProduct, seenDomains, 4);
+    for (const l of shoppingLinks) seenDomains.add(urlDomain(l.url));
+
     const broadLinks = pickBroadRetailerLinks(broadResults, searchProduct, seenDomains, 8);
 
-    const combined = [...fixedLinks, ...broadLinks];
+    // Attach a shopping-price fallback to EVERY link, regardless of which
+    // tier found it — a fixed-domain link (Amazon/Jumia/Noon/B.TECH) can
+    // also have a Shopping hit for the same store, and that price is worth
+    // keeping as a fallback for when _priceResolver.ts can't read that
+    // store's live page (see RetailerLink.shoppingPrice above).
+    const shoppingDataByDomain = buildShoppingDataMap(shoppingResults, searchProduct);
+    const withShoppingData = (links: RetailerLink[]) =>
+      links.map((l) => {
+        const hit = shoppingDataByDomain.get(urlDomain(l.url));
+        return { ...l, shoppingPrice: hit?.price ?? null, shoppingImageUrl: hit?.imageUrl ?? null };
+      });
+
+    const combined = withShoppingData([...fixedLinks, ...shoppingLinks, ...broadLinks]);
     if (combined.length > 0) return combined;
 
     // Serper returned nothing at all for either query — fall back to plain
     // store-search links for the known domains so the UI still has
     // something to show rather than an empty list.
+    return buildRetailerSearchLinks(product, currency, condition);
+  } catch (e) {
+    // Pre-existing fail-open pattern used throughout this file: a Serper
+    // outage or unexpected error here should never break the whole report —
+    // fall back to plain store-search links (no price/exact-listing info,
+    // but the UI still has somewhere useful to send the user).
+    console.error("[fetchMainProductRetailerLinks] failed, falling back to search links:", (e as any)?.message);
     return buildRetailerSearchLinks(product, currency, condition);
   }
 }
@@ -1393,15 +1570,19 @@ export function attachSearchLinksToAlternatives(
 export interface RetailerLink {
   retailer: string;
   url: string;
-  // True when `url` was verified as an actual single product page (Serper
-  // hit that passed cleanAndVerifyUrl, or a broad-discovery hit — those are
-  // dropped entirely when unverified, see pickBroadRetailerLinks). False
-  // when it's a plain store-search fallback URL (buildStoreSearchUrl /
-  // buildRetailerSearchLinks) that lands on a search/listing page instead
-  // of the product itself. Independent of whether a price was resolved —
-  // a verified product page can still have isDirectProduct: true with no
-  // price if the store blocks price scraping (e.g. Amazon).
-  isDirectProduct: boolean;
+  // Best-effort price from Google Shopping's product feed for this exact
+  // domain, when Serper's /shopping endpoint had a hit for it — set
+  // regardless of which tier (fixed/shopping/broad) discovered the link
+  // itself. This is now the PRIMARY price source in _priceResolver.ts (see
+  // that file's tier 0) — live-page reading is the fallback, only tried
+  // when this is null/missing for the domain.
+  shoppingPrice?: number | null;
+  // Product image straight from the same Google Shopping hit as
+  // shoppingPrice above — used as the primary image source whenever a link
+  // resolves via the shopping tier in _priceResolver.ts, since it needs no
+  // extra fetch to the store's own page at all (more reliable than trying
+  // to scrape og:image off a page that might not even load in time).
+  shoppingImageUrl?: string | null;
 }
 
 // Friendly display names for each retailer domain.
@@ -1496,7 +1677,6 @@ export function buildRetailerSearchLinks(
   return visibleDomains.map((domain) => ({
     retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
     url: buildStoreSearchUrl(domain, product),
-    isDirectProduct: false,
   }));
 }
 
@@ -1530,15 +1710,9 @@ export function pickDirectRetailerLinks(
 
   return visibleDomains.map((domain) => {
     const hit = serperResults.find((r) => urlDomain(r.url).endsWith(domain));
-    // A "hit" is only usable as a direct link if it's actually a single
-    // product page (not a search/category/collection page Serper happened
-    // to surface). If it fails that check, fall back to the store's own
-    // search URL — never a fabricated product link.
-    const verifiedUrl = hit ? cleanAndVerifyUrl(hit.url, undefined, product) : null;
     return {
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
-      url: verifiedUrl || buildStoreSearchUrl(domain, product),
-      isDirectProduct: !!verifiedUrl,
+      url: hit ? hit.url : buildStoreSearchUrl(domain, product),
     };
   });
 }

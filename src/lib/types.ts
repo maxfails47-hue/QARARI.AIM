@@ -74,13 +74,6 @@ interface AnalysisResultBase {
     currency?: string;
     inStock?: boolean | null;
     lastChecked?: string;
-    // True when `url` is a verified single product page; false when it's a
-    // plain store-search fallback (no confirmed product match). Independent
-    // of `price` — a verified product page can still have no price if the
-    // store blocks scraping (e.g. Amazon). Optional only for backward
-    // compatibility with cached/history results saved before this field
-    // existed; treat missing as unknown, not as either true or false.
-    isDirectProduct?: boolean;
   }[];
   productImage?: string | null;
   createdAt: number;

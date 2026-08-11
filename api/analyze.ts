@@ -12,7 +12,7 @@ import {
   type AlternativeWithLinks,
 } from "./_groq_tavily.js";
 import { logAiUsage } from "./_costTracking.js";
-import { resolvePricesForLinks } from "./_priceResolver.js";
+import { resolvePricesForLinks, type ResolvedStorePrice } from "./_priceResolver.js";
 import { hostnameOf, loadKnownBadDomains, persistDomainHealth } from "./_domainHealth.js";
 import { logRequestStart, logRequestSuccess, logUnhandledError, logStep, logEnvPresence } from "./_logger.js";
 import { FREE_TIER_LIMITS, DEFAULT_PREMIUM_LIMITS, FAIR_USE_CONFIG, getBurstLimit } from "./_planConfig.js";
@@ -841,7 +841,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Merge the real price/stock/lastChecked data back into retailerPrices
         // so the "find the best price yourself" section can show real numbers
         // next to each store link instead of just a bare link.
-        retailerPrices = resolved;
+        //
+        // Deterministic sort — never left to the AI (it can misorder numbers
+        // or hallucinate comparisons): in-stock-with-a-real-price first,
+        // cheapest to most expensive; out-of-stock listings next (still
+        // sorted by price, so a browsing user can see what it usually goes
+        // for); links whose price couldn't be resolved at all go last, in
+        // their original discovery order. The frontend still marks the
+        // single cheapest with an "Cheapest" badge — this just makes the
+        // whole list scan cheapest-to-priciest instead of discovery order.
+        const rank = (r: ResolvedStorePrice) => {
+          if (typeof r.price !== "number") return 2; // unresolved — always last
+          return r.inStock === false ? 1 : 0; // out-of-stock sinks below in-stock
+        };
+        retailerPrices = [...resolved].sort((a, b) => {
+          const rankDiff = rank(a) - rank(b);
+          if (rankDiff !== 0) return rankDiff;
+          if (typeof a.price === "number" && typeof b.price === "number") {
+            return a.price - b.price;
+          }
+          return 0; // keep original relative order otherwise (stable sort)
+        });
       } catch (e) {
         console.error("[/api/analyze] Resolving live retailer prices failed (non-fatal, keeping AI-estimated range):", e);
       }
