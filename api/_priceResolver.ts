@@ -58,14 +58,16 @@ const READER_PROXY_TIMEOUT_MS = 7000;
 // Raised from 9500 -> 13500 to leave room for the new reader-proxy tier
 // (only reached when the first three tiers all miss) without starving it
 // of a fair timeout of its own.
-// Raised from 13500 -> 26000. With the heavy-domain fast path below
-// (known hard domains skip straight to ScraperAPI instead of burning time
-// on jina/allorigins first), ScraperAPI's full 20000ms budget now fits
-// comfortably inside this cap without needing the much larger 48000ms this
-// constant briefly held — that larger value would have pushed whole-report
-// time uncomfortably close to Vercel's function timeout. Still bounded per
-// link and resolved in parallel across links.
-const PER_LINK_HARD_CAP_MS = 26000;
+// Raised from 26000 -> 36000. ScraperAPI is now tried FIRST for every
+// link (see proxyOrderFor) instead of last, so a worst case where it also
+// times out still needs room for the jina (7s) + allorigins (7s) fallback
+// afterward: 20000 (ScraperAPI) + 7000 + 7000 = 34000, plus a little
+// slack. Still bounded per-link and resolved in parallel across links —
+// this only affects the wall-clock time of whichever single store is
+// slowest, not the whole report — and stays under Vercel's 60s function
+// timeout (vercel.json) since it's not on the critical path with the other
+// AI calls that run in parallel with price resolution.
+const PER_LINK_HARD_CAP_MS = 36000;
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
 
 // Rotating pool of realistic desktop UAs. Some retailer sites fingerprint
@@ -484,21 +486,24 @@ const READER_PROXIES: { name: string; build: (url: string) => string; timeoutMs?
   ...(SCRAPERAPI_PROXY ? [SCRAPERAPI_PROXY] : []),
 ];
 
-// Big-name retailers with strong, well-documented anti-bot protection
-// (Cloudflare/Akamai-grade challenges, IP+UA fingerprinting) where the free
-// jina/allorigins proxies essentially never get through — trying them first
-// just burns ~14s of the per-link time budget for a near-guaranteed miss,
-// which used to starve ScraperAPI (the tier that actually stands a chance)
-// of enough remaining time to finish before PER_LINK_HARD_CAP_MS cut it
-// off. For these domains specifically, skip straight to ScraperAPI so it
-// gets its full timeout budget instead of the leftovers.
-const HEAVY_PROTECTION_DOMAINS = [
-  "amazon", "noon.com", "jumia", "dubizzle", "eshop.orange.eg", "carrefoureg",
-];
-
-function isHeavilyProtected(url: string): boolean {
-  const host = hostnameOf(url).toLowerCase();
-  return HEAVY_PROTECTION_DOMAINS.some((d) => host.includes(d));
+// Direct-plan change: the user wants maximum price coverage across EVERY
+// store, cost/efficiency second. Previously ScraperAPI was reserved for a
+// short list of known-hard domains and tried LAST after the free proxies —
+// now it's tried FIRST for every single link (when the key is configured),
+// since it's by far the most reliable tier (real JS rendering, real IP)
+// and free jina/allorigins were mostly just adding failed attempts before
+// reaching it. jina/allorigins are kept only as a fallback AFTER
+// ScraperAPI, for the rare case ScraperAPI itself errors/times out on a
+// given link — never skipped entirely, just no longer first in line.
+function proxyOrderFor(_url: string): { name: string; build: (url: string) => string; timeoutMs?: number }[] {
+  if (SCRAPERAPI_PROXY) {
+    return [
+      SCRAPERAPI_PROXY,
+      { name: "jina", build: (url: string) => `https://r.jina.ai/${url}` },
+      { name: "allorigins", build: (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
+    ];
+  }
+  return READER_PROXIES; // no key configured — original free-only order
 }
 
 async function fetchViaReaderProxy(url: string): Promise<string | null> {
@@ -507,7 +512,7 @@ async function fetchViaReaderProxy(url: string): Promise<string | null> {
   // budget for nothing. Falls through to the normal ordered list below only
   // if there's no key configured (nothing to skip to) or the domain isn't
   // one of the known-hard ones.
-  const proxies = isHeavilyProtected(url) && SCRAPERAPI_PROXY ? [SCRAPERAPI_PROXY] : READER_PROXIES;
+  const proxies = proxyOrderFor(url);
   for (const proxy of proxies) {
     const controller = new AbortController();
     const timeoutMs = proxy.timeoutMs ?? READER_PROXY_TIMEOUT_MS;
@@ -728,10 +733,13 @@ export async function resolvePricesForLinks(
   knownBadDomains: Set<string> = new Set()
 ): Promise<ResolvedStorePrice[]> {
   const capped = links.slice(0, MAX_LINKS_TO_RESOLVE);
+  // Every link now prefers the reader-proxy tier first (see proxyOrderFor
+  // above — ScraperAPI leads that list whenever the key is configured),
+  // since maximizing how many stores show a price matters more here than
+  // saving a direct-fetch attempt. knownBadDomains is now redundant for
+  // this decision but kept for the domain_health signal elsewhere.
   const settled = await Promise.allSettled(
-    capped.map((link) =>
-      resolveOne(link, currency, knownBadDomains.has(hostnameOf(link.url)) || isHeavilyProtected(link.url))
-    )
+    capped.map((link) => resolveOne(link, currency, true))
   );
   return settled.map((r, i) =>
     r.status === "fulfilled"
