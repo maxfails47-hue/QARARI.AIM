@@ -1,0 +1,164 @@
+export type Language = "ar" | "en";
+export type Verdict = "good" | "fair" | "bad";
+export type Screen = "input" | "reveal" | "report" | "history" | "profile" | "login" | "upgrade" | "guide" | "advisor" | "watchlist";
+
+export interface Currency {
+  code: string;
+  enName: string;
+  arName: string;
+  enShort: string;
+  arShort: string;
+}
+
+export const currencies: Currency[] = [
+  { code: "EGP", enName: "Egyptian Pound", arName: "جنيه مصري", enShort: "EGP", arShort: "جنيه" },
+  { code: "USD", enName: "US Dollar", arName: "دولار أمريكي", enShort: "USD", arShort: "دولار" },
+  { code: "SAR", enName: "Saudi Riyal", arName: "ريال سعودي", enShort: "SAR", arShort: "ريال" },
+  { code: "AED", enName: "UAE Dirham", arName: "درهم إماراتي", enShort: "AED", arShort: "درهم" },
+  { code: "EUR", enName: "Euro", arName: "يورو", enShort: "EUR", arShort: "يورو" },
+  { code: "KWD", enName: "Kuwaiti Dinar", arName: "دينار كويتي", enShort: "KWD", arShort: "دينار" },
+];
+
+export const FREE_MONTHLY_LIMIT = 3; // matches FREE_TIER_LIMITS.scans in api/_planConfig.ts — used only as initial UI fallback before the real value loads from the server
+export const MONTHLY_PRICE = 150;
+export const INSTAPAY_NUMBER = "01025204455";
+export const SUPPORT_WHATSAPP = "201143494418";
+
+export interface BilingualText {
+  ar: string;
+  en: string;
+}
+
+export interface BilingualArray {
+  ar: string[];
+  en: string[];
+}
+
+export interface Alternative {
+  name: string;
+  reason: BilingualText;
+  whySuitable: BilingualText;
+  // "Search this yourself" links (Jumia/Amazon/Noon/etc.) — pure store
+  // search URLs for the alternative's name, no price attached. Replaces the
+  // old estimatedPrice/medianPrice fields; alternatives no longer show any
+  // computed or guessed price.
+  searchLinks?: { retailer: string; url: string }[];
+}
+
+interface AnalysisResultBase {
+  id: string;
+  product: string;
+  currency: string;
+  condition?: string;
+  // Nullable: the backend now allows the AI to return null for these when it
+  // genuinely has no reliable pricing data, instead of inventing a number.
+  marketFairPriceMin: number | null;
+  marketFairPriceMax: number | null;
+  marketFairPriceMid: number | null;
+  // A single Gemini/Google-AI-Overview-style analytical paragraph describing
+  // the current market price range in natural language (new vs used, min/max).
+  marketPriceSummary: BilingualText;
+  // Resale Value Prediction (2-year outlook only)
+  resaleValueRightNow?: number | null;
+  resaleValue2Years?: number | null;
+  resaleInsight?: BilingualText;
+  // "Search the best price yourself" links (Jumia/Amazon/Noon/optionally
+  // B.TECH) — built server-side as pure store search URLs for the product
+  // name (see buildRetailerSearchLinks in api/_groq_tavily.ts). No price is
+  // fetched or shown here; each link just opens that store's own search
+  // results page for the product.
+  retailerPrices?: {
+    retailer: string;
+    url: string;
+    price?: number | null;
+    currency?: string;
+    inStock?: boolean | null;
+    lastChecked?: string;
+    // Every entry here already passed exact-product matching + listing-page
+    // rejection server-side (see api/_groq_tavily.ts) — matchType is always
+    // "EXACT" in this array. priceStatus mirrors whether `price` resolved.
+    matchType?: "EXACT" | "SIMILAR";
+    isExact?: boolean;
+    priceStatus?: "VERIFIED" | "UNAVAILABLE";
+  }[];
+  // Populated ONLY when retailerPrices is empty — the exact product couldn't
+  // be confirmed on any store, so these are clearly-labeled closest matches,
+  // never mixed into retailerPrices itself.
+  similarProducts?: {
+    retailer: string;
+    url: string;
+    price?: number | null;
+    currency?: string;
+    matchType?: "EXACT" | "SIMILAR";
+  }[];
+  priceSearchSummary?: { searched: number; verified: number; unavailable: number };
+  productImage?: string | null;
+  createdAt: number;
+}
+
+// "Find the price" mode: the user gave no offered price (on purpose, or
+// because photo OCR couldn't read one), so the backend skips the AI
+// verdict/negotiation/alternatives call entirely and only returns the
+// researched market-price fields from AnalysisResultBase — no verdict, no
+// moneySaved, no negotiation script. Matches the `!hasPrice` branch in
+// api/analyze.ts exactly.
+export interface FindPriceResult extends AnalysisResultBase {
+  priceMode: "findPrice";
+  offeredPrice: null;
+}
+
+// The original full flow: a price was given, so the AI produced a verdict,
+// negotiation script, alternatives, etc. `priceMode` is optional here (as
+// `"evaluate"` or absent) so older cached/history results saved before
+// priceMode existed still satisfy this type.
+export interface EvaluateResult extends AnalysisResultBase {
+  priceMode?: "evaluate";
+  offeredPrice: number;
+  verdict: Verdict;
+  moneySaved: number | null;
+  reasoningPoints: BilingualArray;
+  preRecommendation: BilingualText;
+  futureCompatibility: BilingualText;
+  regretLevel: "low" | "medium" | "high";
+  regretJustification: BilingualText;
+  pros: BilingualArray;
+  cons: BilingualArray;
+  hiddenRisks: BilingualArray;
+  finalTip: BilingualText;
+  betterAlternatives: Alternative[];
+  negotiationScript: BilingualText;
+  negotiationScriptVariants?: { polite: BilingualText; firm: BilingualText };
+  communityInsights?: {
+    analyzedCount: number;
+    recentPrices: number[];
+  } | null;
+}
+
+// Check `priceMode` before reading verdict/offeredPrice/moneySaved/etc. —
+// they only exist on the EvaluateResult branch.
+export type AnalysisResult = FindPriceResult | EvaluateResult;
+
+// Feature flag mirroring api/_groq_tavily.ts's SHOW_BTECH_COMPARISON — flip
+// this once a B.TECH affiliate/commission deal is confirmed. Kept as a
+// simple constant since the frontend can't read server env vars directly.
+export const SHOW_BTECH_COMPARISON = false;
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string;
+  age: string;
+  country: string;
+  phone: string;
+  interests: string[];
+  tier: "free" | "premium";
+  currentPlanName?: string;
+  chatMessagesLimit?: number;
+  chatMessagesUsed?: number;
+  priceAlertsLimit?: number;
+  priceAlertsUsed?: number;
+  canExportPdf?: boolean;
+  subscriptionEndDate: number | null;
+  referralCode: string;
+  inviteCount: number;
+}
