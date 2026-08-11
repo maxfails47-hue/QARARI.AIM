@@ -58,16 +58,15 @@ const READER_PROXY_TIMEOUT_MS = 7000;
 // Raised from 9500 -> 13500 to leave room for the new reader-proxy tier
 // (only reached when the first three tiers all miss) without starving it
 // of a fair timeout of its own.
-// Raised from 26000 -> 36000. ScraperAPI is now tried FIRST for every
-// link (see proxyOrderFor) instead of last, so a worst case where it also
-// times out still needs room for the jina (7s) + allorigins (7s) fallback
-// afterward: 20000 (ScraperAPI) + 7000 + 7000 = 34000, plus a little
-// slack. Still bounded per-link and resolved in parallel across links —
-// this only affects the wall-clock time of whichever single store is
-// slowest, not the whole report — and stays under Vercel's 60s function
-// timeout (vercel.json) since it's not on the critical path with the other
-// AI calls that run in parallel with price resolution.
-const PER_LINK_HARD_CAP_MS = 36000;
+// Raised from 36000 -> 45000 to match the smaller, 5-link queue (see
+// MAX_LINKS_TO_RESOLVE): worst-case queue wait for a ScraperAPI slot
+// (~20s) + the link's own ScraperAPI attempt including its 429 retry
+// (~20s + 1.5s + 20s) could approach 40s+ end to end; this leaves a little
+// slack on top. Still bounded per-link and resolved in parallel across
+// links, and total stays under Vercel's 60s function timeout since price
+// resolution isn't the only thing eating that budget but is the dominant
+// cost.
+const PER_LINK_HARD_CAP_MS = 45000;
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
 
 // Rotating pool of realistic desktop UAs. Some retailer sites fingerprint
@@ -788,7 +787,18 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
 // stores. The fixed, most-reliable links always come first in the input
 // array, so slicing keeps those and only trims the long tail of broad-
 // discovery extras.
-const MAX_LINKS_TO_RESOLVE = 8;
+// Cut from 8 -> 5. This isn't about cost — it's about the concurrency
+// math actually working. With SCRAPERAPI_MAX_CONCURRENT slots and N links
+// all wanting ScraperAPI at once, the last ones in the queue wait roughly
+// (N/SCRAPERAPI_MAX_CONCURRENT - 1) full ScraperAPI timeouts before they
+// even START their own attempt. At N=8/concurrency=3 that queue wait alone
+// could exceed PER_LINK_HARD_CAP_MS, so those links got marked "failed"
+// while still WAITING for a turn, never actually attempted — worse than
+// no queue at all. At N=5/concurrency=3 the worst-case wait is under one
+// ScraperAPI timeout, leaving enough of PER_LINK_HARD_CAP_MS for the
+// link's own attempt to actually run to completion. Fewer stores that
+// reliably show a real price beats more stores that mostly show nothing.
+const MAX_LINKS_TO_RESOLVE = 5;
 
 /**
  * Resolves real prices for every given retailer link, in parallel.
