@@ -1510,8 +1510,25 @@ export function pickDirectRetailerLinks(
 
   const visibleDomains = SHOW_BTECH_COMPARISON ? domains : domains.filter((d) => d !== "btech.com");
 
+  // Previously this took the FIRST Serper result matching each domain, no
+  // matter what it actually was — a category/listing page with a dozen
+  // different products, an unrelated variant (e.g. the Ultra when the user
+  // asked for the plain model), an accessory, etc. would get treated as
+  // "the product page" just as confidently as a real exact match, and
+  // whatever price _priceResolver.ts later read off it belonged to
+  // whatever that page happened to be, not necessarily the user's product.
+  // Now it requires the SAME title/content relevance check pickBroadRetailerLinks
+  // already used (matchesProduct against getSignificantTokens) before
+  // accepting a hit as "the" listing for that store. If no result for a
+  // given domain passes that check, we fall back to that store's own
+  // in-site search URL (buildStoreSearchUrl) — an honest "search here
+  // yourself" link — rather than confidently pointing at the wrong item.
+  const tokens = getSignificantTokens(product);
+
   return visibleDomains.map((domain) => {
-    const hit = serperResults.find((r) => urlDomain(r.url).endsWith(domain));
+    const hit = serperResults.find(
+      (r) => urlDomain(r.url).endsWith(domain) && matchesProduct(`${r.title} ${r.content}`, tokens)
+    );
     return {
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
       url: hit ? hit.url : buildStoreSearchUrl(domain, product),
