@@ -497,7 +497,14 @@ async function fetchViaReaderProxy(url: string): Promise<string | null> {
       clearTimeout(timeout);
       if (!res.ok) continue; // try the next proxy
       const text = await res.text();
-      if (text && text.length > 40) return text.slice(0, MAX_HTML_BYTES);
+      // A proxy can return 200 OK while actually handing back the TARGET
+      // site's own anti-bot interstitial (captcha/"access denied"/etc.) —
+      // that's not a real product page, so treat it the same as a failed
+      // proxy and fall through to the next one (ultimately reaching
+      // ScraperAPI) instead of returning it as if it were usable content.
+      if (text && text.length > 40 && !looksLikeBlockPage(text)) {
+        return text.slice(0, MAX_HTML_BYTES);
+      }
     } catch {
       // timeout, network error, or this proxy itself got blocked — fall
       // through to the next one rather than giving up entirely
