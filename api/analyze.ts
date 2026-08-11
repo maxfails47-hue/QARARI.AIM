@@ -4,7 +4,6 @@ import {
   callAnalysisModel,
   getFairPriceRange,
   fetchMainProductRetailerLinks,
-  fetchSimilarProductFallbackLinks,
   attachLinksAndPricesToAlternatives,
   attachSearchLinksToAlternatives,
   getRegionForCurrency,
@@ -152,28 +151,17 @@ interface MarketCacheEntry {
   marketFairPriceMid: number | null;
   marketPriceSummary: { ar: string; en: string } | null;
   retailerPrices: any[];
-  // Populated ONLY when retailerPrices came back empty (no store had a
-  // confirmed exact-product page) — see fetchSimilarProductFallbackLinks.
-  similarProducts: any[];
-  priceSearchSummary: { searched: number; verified: number; unavailable: number };
   betterAlternatives: AlternativeWithLinks[];
   productImage: string | null;
 }
 
 function extractMarketData(parsed: any): MarketCacheEntry {
-  const retailerPrices = Array.isArray(parsed.retailerPrices) ? parsed.retailerPrices : [];
   return {
     marketFairPriceMin: parsed.marketFairPriceMin ?? null,
     marketFairPriceMax: parsed.marketFairPriceMax ?? null,
     marketFairPriceMid: parsed.marketFairPriceMid ?? null,
     marketPriceSummary: parsed.marketPriceSummary ?? null,
-    retailerPrices,
-    similarProducts: Array.isArray(parsed.similarProducts) ? parsed.similarProducts : [],
-    priceSearchSummary: parsed.priceSearchSummary ?? {
-      searched: retailerPrices.length,
-      verified: retailerPrices.filter((r: any) => r && typeof r.price === "number").length,
-      unavailable: retailerPrices.filter((r: any) => r && typeof r.price !== "number").length,
-    },
+    retailerPrices: Array.isArray(parsed.retailerPrices) ? parsed.retailerPrices : [],
     betterAlternatives: Array.isArray(parsed.betterAlternatives) ? parsed.betterAlternatives : [],
     productImage: typeof parsed.productImage === "string" ? parsed.productImage : null,
   };
@@ -778,19 +766,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log("[/api/analyze] Fair price range:", marketPrice.min, "-", marketPrice.max, "| mid:", marketPrice.mid);
 
       // ---- STEP 1b: retailer direct listing links (Jumia/Amazon/Noon, etc.) ----
-      // Only EXACT-product links come back here (see fetchMainProductRetailerLinks
-      // in _groq_tavily.ts) — a store with no confirmed product page is simply
-      // absent from this list, never backfilled with a search-page URL.
       let retailerPrices: any[] = [];
-      let similarProducts: any[] = [];
       try {
         retailerPrices = await fetchMainProductRetailerLinks(searchProductName, currency, cond);
-        // Similar-product fallback ONLY when the exact product couldn't be
-        // confirmed on a single store — per the "similar products only as
-        // fallback" rule, this must never run when exact matches exist.
-        if (retailerPrices.length === 0) {
-          similarProducts = await fetchSimilarProductFallbackLinks(searchProductName, currency, cond);
-        }
       } catch (e) {
         console.error("[/api/analyze] Building retailer search links failed (non-fatal):", e);
       }
@@ -814,7 +792,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // near-0% for them.
         const knownBadDomains = await loadKnownBadDomains(admin);
         const resolved = await resolvePricesForLinks(retailerPrices, currency, knownBadDomains);
-        const withPrice = resolved.filter((r) => typeof r.price === "number");
+        // Exclude "similar product, not an exact match" hits (matched ===
+        // false — see _groq_tavily.ts) from ever feeding the fair-price
+        // range: a price read off a different model would skew the range
+        // even though the store link itself is legitimate to show.
+        const withPrice = resolved.filter((r) => typeof r.price === "number" && r.matched !== false);
 
         // Feed this live resolution's outcome back into the same
         // cumulative table — this is what lets the "known bad" signal
@@ -833,7 +815,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           persistDomainHealth(admin, liveDomainStats).catch(() => {});
         }
 
-        if (withPrice.length > 0) {
+        // Only trust the REAL prices as the fair-price range once enough of
+        // them came back — 1-3 stores is too thin a sample to safely
+        // replace the AI's own broader-market estimate with (a single
+        // store's price isn't a "range" at all, it's one data point that
+        // could be unusually high or low). At 4+ stores the live numbers
+        // are a more reliable signal than the AI estimate and take over.
+        const MIN_STORES_FOR_REAL_RANGE = 4;
+        if (withPrice.length >= MIN_STORES_FOR_REAL_RANGE) {
           const prices = withPrice.map((r) => r.price as number);
           const min = Math.min(...prices);
           const max = Math.max(...prices);
@@ -845,12 +834,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // from the real numbers so the text never contradicts the figures
           // shown above it.
           marketPrice.summary = {
-            ar: `بناءً على أسعار حقيقية من ${withPrice.length} ${withPrice.length === 1 ? "متجر" : "متاجر"} تم فحصها الآن، يتراوح السعر بين ${Math.round(min).toLocaleString()} و${Math.round(max).toLocaleString()} ${currency}.`,
-            en: `Based on real prices just checked across ${withPrice.length} store${withPrice.length === 1 ? "" : "s"}, the price ranges from ${Math.round(min).toLocaleString()} to ${Math.round(max).toLocaleString()} ${currency}.`,
+            ar: `بناءً على أسعار حقيقية من ${withPrice.length} متاجر تم فحصها الآن، يتراوح السعر بين ${Math.round(min).toLocaleString()} و${Math.round(max).toLocaleString()} ${currency}.`,
+            en: `Based on real prices just checked across ${withPrice.length} stores, the price ranges from ${Math.round(min).toLocaleString()} to ${Math.round(max).toLocaleString()} ${currency}.`,
           };
           console.log(`[/api/analyze] Real price range from ${withPrice.length} stores: ${min}-${max} (was AI estimate before override)`);
         } else {
-          console.warn("[/api/analyze] No store resolved a real price — keeping AI-estimated fair price range.");
+          console.warn(
+            `[/api/analyze] Only ${withPrice.length} store(s) resolved a real price (need ${MIN_STORES_FOR_REAL_RANGE}+) — keeping AI-estimated fair price range.`
+          );
         }
 
         // Product photo: prefer the cheapest resolved store's image, else
@@ -863,18 +854,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Merge the real price/stock/lastChecked data back into retailerPrices
         // so the "find the best price yourself" section can show real numbers
         // next to each store link instead of just a bare link.
-        retailerPrices = resolved;
+        //
+        // Links we could never confirm even open (source: "unreachable" —
+        // every fetch path came back empty) are dropped here rather than
+        // shown to the user: a link with no evidence it loads has no
+        // business being presented as somewhere to go check the price.
+        retailerPrices = resolved.filter((r) => r.source !== "unreachable");
       } catch (e) {
         console.error("[/api/analyze] Resolving live retailer prices failed (non-fatal, keeping AI-estimated range):", e);
       }
-
-      // Summary counts for the "المتاجر التي تم البحث فيها" UI block —
-      // purely derived from what's already in retailerPrices, no extra calls.
-      const priceSearchSummary = {
-        searched: retailerPrices.length,
-        verified: retailerPrices.filter((r) => r && typeof r.price === "number").length,
-        unavailable: retailerPrices.filter((r) => r && typeof r.price !== "number").length,
-      };
 
       // ---- STEP 1c: alternatives with their own fair price ranges + links ----
       // For now we need a lightweight prompt to get alternative names.
@@ -950,8 +938,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         marketFairPriceMid: marketPrice.mid,
         marketPriceSummary: marketPrice.summary,
         retailerPrices,
-        similarProducts,
-        priceSearchSummary,
         betterAlternatives: alternativesWithPrices,
         productImage,
       };
@@ -976,8 +962,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           marketFairPriceMid: marketPrice.mid,
           marketPriceSummary: marketPrice.summary,
           retailerPrices,
-          similarProducts,
-          priceSearchSummary,
           betterAlternatives: [],
           productImage,
         };
@@ -1024,8 +1008,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         marketFairPriceMid: normalizedMarket.mid,
         marketPriceSummary: normalizedMarket.summary,
         retailerPrices: marketData.retailerPrices,
-        similarProducts: marketData.similarProducts,
-        priceSearchSummary: marketData.priceSearchSummary,
         productImage: marketData.productImage ?? null,
         createdAt: Date.now(),
       };
@@ -1154,8 +1136,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       marketFairPriceMid,
       marketPriceSummary: normalizedMarket.summary,
       retailerPrices: marketData.retailerPrices,
-        similarProducts: marketData.similarProducts,
-        priceSearchSummary: marketData.priceSearchSummary,
       betterAlternatives: marketData.betterAlternatives,
       productImage: marketData.productImage ?? null,
       // AI-generated decision (always fresh, never cached)

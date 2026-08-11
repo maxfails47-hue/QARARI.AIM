@@ -38,16 +38,19 @@ export interface ResolvedStorePrice {
   inStock: boolean | null; // null = couldn't determine
   imageUrl: string | null; // product photo, when the page's own JSON-LD/meta has one — never AI-generated
   lastChecked: string; // ISO timestamp
-  source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "unresolved";
-  // ─── Carried through from the input RetailerLink (see _groq_tavily.ts) ───
-  // Every link entering this resolver already passed exact-product matching
-  // and listing-page rejection — this file only ever adds price/stock data
-  // on top, never changes whether something counts as an exact match.
-  matchType: "EXACT" | "SIMILAR";
-  isExact: boolean;
-  // VERIFIED: exact product + a real price was read off the live page.
-  // UNAVAILABLE: exact product confirmed, but no price could be extracted.
-  priceStatus: "VERIFIED" | "UNAVAILABLE";
+  // "unresolved"  = the page DID load (we have real HTML/text from it) but
+  //                 no price could be confidently extracted off it.
+  // "unreachable" = the link never returned any usable content at all,
+  //                 across every fetch path we tried (plain fetch + retry +
+  //                 reader-proxy). Callers should drop these from what's
+  //                 shown to the user — a link we can't confirm even opens
+  //                 has no business being presented as a place to check the
+  //                 price.
+  source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "unresolved" | "unreachable";
+  // Carried over from RetailerLink.matched (see _groq_tavily.ts) — whether
+  // this URL was confirmed to be THIS exact product's page vs. a same-
+  // domain hit that looked like a similar/alternative item.
+  matched?: boolean;
 }
 
 const FETCH_TIMEOUT_MS = 6000;
@@ -448,11 +451,7 @@ async function extractViaAi(html: string, retailer: string, currency: string): P
 
 async function resolveOneInner(link: RetailerLink, currency: string, preferReaderProxy: boolean): Promise<ResolvedStorePrice> {
   const lastChecked = new Date().toISOString();
-  const matchType: "EXACT" | "SIMILAR" = link.matchType === "SIMILAR" ? "SIMILAR" : "EXACT";
-  const isExact = link.isExact !== false;
-  // priceStatus placeholder here — resolveOne() always recomputes the real
-  // value via withPriceStatus() from whatever price this function returns.
-  const base = { retailer: link.retailer, url: link.url, currency, lastChecked, matchType, isExact, priceStatus: "UNAVAILABLE" as const };
+  const base = { retailer: link.retailer, url: link.url, currency, lastChecked, matched: link.matched };
 
   // Domains with a known-poor plain-fetch success rate (see
   // _domainHealth.ts — loaded from cumulative history, not a guess) skip
@@ -497,8 +496,15 @@ async function resolveOneInner(link: RetailerLink, currency: string, preferReade
       if (renderedAi) {
         return { ...base, price: renderedAi.price, inStock: renderedAi.inStock, imageUrl: null, source: "ai-rendered" };
       }
+      // Reader proxy DID return content but no price could be read off it —
+      // the page is reachable, just not price-extractable.
+      return { ...base, price: null, inStock: null, imageUrl: null, source: "unresolved" };
     }
-    return { ...base, price: null, inStock: null, imageUrl: null, source: "unresolved" };
+    // Every fetch path (plain fetch + retry + reader-proxy) came back with
+    // nothing at all — we cannot even confirm this link opens. Distinct
+    // from "unresolved" so callers can drop it rather than show a link
+    // that's never actually been proven to load.
+    return { ...base, price: null, inStock: null, imageUrl: null, source: "unreachable" };
   }
 
   // Image extraction is independent of which price path below succeeds —
@@ -540,17 +546,7 @@ async function resolveOneInner(link: RetailerLink, currency: string, preferReade
 // the AI fallback call on top of a slow-but-successful fetch could still
 // push one store well past what's reasonable — this is the outer safety
 // net that guarantees no single store can hold up the whole report.
-// priceStatus is always derived from the final resolved price rather than
-// set individually at each return site in resolveOneInner — one place to
-// keep it consistent with the VERIFIED/UNAVAILABLE state model regardless of
-// which extraction tier (jsonld/meta/ai/unresolved) actually produced it.
-function withPriceStatus(result: ResolvedStorePrice): ResolvedStorePrice {
-  return { ...result, priceStatus: typeof result.price === "number" ? "VERIFIED" : "UNAVAILABLE" };
-}
-
 async function resolveOne(link: RetailerLink, currency: string, preferReaderProxy: boolean): Promise<ResolvedStorePrice> {
-  const matchType: "EXACT" | "SIMILAR" = link.matchType === "SIMILAR" ? "SIMILAR" : "EXACT";
-  const isExact = link.isExact !== false;
   const fallback: ResolvedStorePrice = {
     retailer: link.retailer,
     url: link.url,
@@ -559,18 +555,17 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
     inStock: null,
     imageUrl: null,
     lastChecked: new Date().toISOString(),
-    source: "unresolved",
-    matchType,
-    isExact,
-    priceStatus: "UNAVAILABLE",
+    // Hit the hard cap before anything came back — same as never getting
+    // usable content, so treat it the same as "unreachable" downstream.
+    source: "unreachable",
+    matched: link.matched,
   };
-  const result = await Promise.race([
+  return Promise.race([
     resolveOneInner(link, currency, preferReaderProxy),
     new Promise<ResolvedStorePrice>((resolve) =>
       setTimeout(() => resolve(fallback), PER_LINK_HARD_CAP_MS)
     ),
   ]);
-  return withPriceStatus(result);
 }
 
 // Ceiling on how many retailer links get their price actually resolved.
@@ -612,10 +607,8 @@ export async function resolvePricesForLinks(
           inStock: null,
           imageUrl: null,
           lastChecked: new Date().toISOString(),
-          source: "unresolved" as const,
-          matchType: capped[i].matchType === "SIMILAR" ? ("SIMILAR" as const) : ("EXACT" as const),
-          isExact: capped[i].isExact !== false,
-          priceStatus: "UNAVAILABLE" as const,
+          source: "unreachable" as const,
+          matched: capped[i].matched,
         }
   );
 }

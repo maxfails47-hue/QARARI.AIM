@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { Globe, History, User, Sparkles, Plus, Bell, MoreVertical } from "lucide-react";
+import { Globe, History, User, Sparkles, Plus, Bell, MoreVertical, Crown } from "lucide-react";
 import { HeaderInstallButton } from "@/components/HeaderInstallButton";
 
 export function Header() {
-  const { lang, setLang, t, navigate, screen, user } = useApp();
+  const { lang, t, setLang, navigate, screen, user, isPremium } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +42,18 @@ export function Header() {
         </button>
 
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => navigate(isPremium ? "profile" : "upgrade")}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+              isPremium
+                ? "bg-gradient-to-br from-amber-300 to-amber-600 text-[#0B0B0F] shadow-md shadow-amber-500/30"
+                : "text-amber-400/70 hover:bg-amber-500/10 hover:text-amber-400"
+            }`}
+            title={isPremium ? (lang === "ar" ? "عضو بريميوم" : "Premium member") : (lang === "ar" ? "ترقية لبريميوم" : "Upgrade to Premium")}
+            aria-label={isPremium ? (lang === "ar" ? "عضو بريميوم" : "Premium member") : (lang === "ar" ? "ترقية لبريميوم" : "Upgrade to Premium")}
+          >
+            <Crown className="h-5 w-5" fill={isPremium ? "currentColor" : "none"} />
+          </button>
           <button
             onClick={() => navigate("input")}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${

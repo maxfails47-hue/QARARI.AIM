@@ -10,30 +10,30 @@ import {
   Shield, Lightbulb, Copy, Share2, Bookmark, Bell,
   ThumbsUp, ThumbsDown, MessageCircle, Mic, Send,
   Sparkles, Users, RefreshCw, DollarSign, Handshake,
-  ExternalLink, ShoppingCart,
+  ExternalLink, ShoppingCart, ShieldCheck, Globe, CheckCircle2, Link2, Tags,
 } from "lucide-react";
 
-// ---- "أفضل سعر مؤكد" — exact-product price comparison ----
-// Renders whenever the report carries at least one confirmed exact-product
-// store link. Every entry has already passed exact-product matching and
-// listing/search-page rejection server-side (see api/_groq_tavily.ts) — this
-// component only ever distinguishes VERIFIED (a real price was read) from
-// UNAVAILABLE (product confirmed, price couldn't be read), never invents one.
+// "5 دقيقة"/"5m" style relative time since a store's price was last verified.
+function timeAgoLabel(iso: string | undefined, lang: "ar" | "en"): string {
+  if (!iso) return "";
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return lang === "ar" ? "الآن" : "just now";
+  if (mins < 60) return lang === "ar" ? `منذ ${mins} دقيقة` : `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  return lang === "ar" ? `منذ ${hrs} ساعة` : `${hrs}h ago`;
+}
+
+// ---- "Search the best price yourself" (Jumia/Amazon/Noon/optionally B.TECH) ----
+// Renders whenever the report carries at least one store link. Each entry
+// now also carries a REAL live price/stock status when api/analyze.ts
+// managed to resolve one (see api/_priceResolver.ts) — shown next to the
+// link when available; falls back to a plain "view current price" link
+// when a store's price couldn't be read live.
 function RetailerSearchLinks({
   retailerPrices,
-  priceSearchSummary,
   lang,
 }: {
-  retailerPrices: {
-    retailer: string;
-    url: string;
-    price?: number | null;
-    currency?: string;
-    inStock?: boolean | null;
-    lastChecked?: string;
-    priceStatus?: "VERIFIED" | "UNAVAILABLE";
-  }[];
-  priceSearchSummary?: { searched: number; verified: number; unavailable: number };
+  retailerPrices: { retailer: string; url: string; price?: number | null; currency?: string; inStock?: boolean | null; lastChecked?: string; matched?: boolean }[];
   lang: "ar" | "en";
 }) {
   const visibleLinks = retailerPrices.filter(
@@ -42,50 +42,83 @@ function RetailerSearchLinks({
 
   if (visibleLinks.length < 1) return null;
 
-  const cheapestPrice = visibleLinks.reduce<number | null>((min, rp) => {
-    if (typeof rp.price !== "number") return min;
-    return min === null ? rp.price : Math.min(min, rp.price);
+  // A price is only ever shown as "confirmed" when we both read a real
+  // number off the page AND confirmed it's this exact product (matched
+  // !== false). A same-domain hit for a similar/alternate model never gets
+  // treated as a price for the exact item, even if we could read a number
+  // off it.
+  const confirmedLinks = visibleLinks.filter((rp) => typeof rp.price === "number" && rp.matched !== false);
+  const similarLinks = visibleLinks.filter((rp) => rp.matched === false);
+  const unavailableLinks = visibleLinks.filter((rp) => typeof rp.price !== "number" && rp.matched !== false);
+  const cheapest = confirmedLinks.reduce<typeof confirmedLinks[number] | null>((best, rp) => {
+    if (!best || (rp.price as number) < (best.price as number)) return rp;
+    return best;
   }, null);
-  const verifiedCount = priceSearchSummary?.verified ?? visibleLinks.filter((r) => typeof r.price === "number").length;
-  const hasAnyVerified = verifiedCount > 0;
-
-  const minutesAgo = (iso?: string): number | null => {
-    if (!iso) return null;
-    const diffMs = Date.now() - new Date(iso).getTime();
-    if (Number.isNaN(diffMs) || diffMs < 0) return null;
-    return Math.max(0, Math.round(diffMs / 60000));
-  };
+  // Confirmed stores first (cheapest leading), then unconfirmed-but-exact,
+  // then same-category similar items last — matches how people actually
+  // want to scan the list.
+  const sortedLinks = [...confirmedLinks, ...unavailableLinks, ...similarLinks];
 
   return (
     <div className="mb-4 rounded-xl border border-amber-500/15 bg-[#0B0B0F] p-5">
       <h2 className="flex items-center gap-2 font-serif text-lg font-bold text-amber-400">
         <ShoppingCart className="h-5 w-5" />
-        {hasAnyVerified
-          ? (lang === "ar" ? "أفضل سعر مؤكد" : "Best verified price")
-          : (lang === "ar" ? "المنتج المطلوب" : "The exact product")}
+        {lang === "ar" ? "دور على أفضل سعر بنفسك" : "Find the best price yourself"}
       </h2>
-      <p className="mt-1 text-xs text-zinc-500">
-        {lang === "ar" ? "بنعرض الأسعار اللي قدرنا نتأكد منها بس" : "We only show prices we could actually verify"}
-      </p>
-      <p className="mt-1 mb-3 text-[11px] leading-relaxed text-zinc-500">
-        {lang === "ar"
-          ? "بنبحث في المتاجر الموثوقة ونظهر السعر فقط لما نقدر نتأكد منه. باقي المتاجر ممكن تحتاج فتح صفحة المنتج لمعرفة السعر الحالي."
-          : "We search trusted stores and only show a price we could confirm. Other stores may need you to open the product page for the current price."}
-      </p>
 
-      {priceSearchSummary && (
-        <div className="mb-4 flex items-center justify-between rounded-lg bg-zinc-800/40 px-3.5 py-2.5 text-[11px] text-zinc-400">
-          <span>{lang === "ar" ? "المتاجر التي تم البحث فيها" : "Stores searched"}: <b className="text-zinc-200">{priceSearchSummary.searched}</b></span>
-          <span className="text-green-400">{lang === "ar" ? "أسعار مؤكدة" : "Verified"}: <b>{priceSearchSummary.verified}</b></span>
-          <span>{lang === "ar" ? "أسعار غير متاحة" : "Unavailable"}: <b>{priceSearchSummary.unavailable}</b></span>
+      {/* Transparency banner — same message as the "confirmed prices only" policy */}
+      <div className="mt-3 mb-4 flex items-start gap-3 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] p-3.5">
+        <ShieldCheck className="mt-0.5 h-8 w-8 shrink-0 text-amber-400" />
+        <div>
+          <p className="text-sm font-bold text-amber-300">
+            {lang === "ar" ? "نعرض الأسعار التي تم التأكد منها فقط" : "We only show prices we've verified"}
+          </p>
+          <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">
+            {lang === "ar"
+              ? "بنبحث في المتاجر الموثوقة ونظهر السعر فقط عند التأكد منه. باقي المتاجر قد يتطلب فتح الرابط لمعرفة السعر الحالي."
+              : "We search trusted stores and only show a price once it's confirmed. Other stores may require opening the link to see the current price."}
+          </p>
         </div>
-      )}
+      </div>
+
+      {/* Stats row */}
+      <div className="mb-4 grid grid-cols-4 gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-center">
+        <div>
+          <p className="text-[10px] text-zinc-500">{lang === "ar" ? "أفضل سعر مؤكد" : "Best confirmed"}</p>
+          <p className="mt-1 text-sm font-bold text-emerald-400">
+            {cheapest ? `${Math.round(cheapest.price as number).toLocaleString()}` : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="flex items-center justify-center gap-1 text-[10px] text-zinc-500">
+            <Link2 className="h-3 w-3" />{lang === "ar" ? "غير متاحة" : "Unavailable"}
+          </p>
+          <p className="mt-1 text-sm font-bold text-zinc-300">{unavailableLinks.length}</p>
+        </div>
+        <div>
+          <p className="flex items-center justify-center gap-1 text-[10px] text-zinc-500">
+            <CheckCircle2 className="h-3 w-3" />{lang === "ar" ? "مؤكدة" : "Confirmed"}
+          </p>
+          <p className="mt-1 text-sm font-bold text-emerald-400">{confirmedLinks.length}</p>
+        </div>
+        <div>
+          <p className="flex items-center justify-center gap-1 text-[10px] text-zinc-500">
+            <Globe className="h-3 w-3" />{lang === "ar" ? "متاجر تم البحث فيها" : "Stores searched"}
+          </p>
+          <p className="mt-1 text-sm font-bold text-zinc-300">{visibleLinks.length}</p>
+        </div>
+      </div>
+
+      <p className="mb-3 text-xs font-bold text-zinc-300">
+        {lang === "ar" ? "نتائج البحث في المتاجر" : "Store search results"}
+      </p>
 
       <div className="space-y-2.5">
-        {visibleLinks.map((rp, i) => {
+        {sortedLinks.map((rp, i) => {
           const hasPrice = typeof rp.price === "number";
-          const isCheapest = hasPrice && cheapestPrice !== null && rp.price === cheapestPrice;
-          const ago = minutesAgo(rp.lastChecked);
+          const isSimilar = rp.matched === false;
+          const isCheapest = cheapest !== null && rp === cheapest;
+
           return (
             <a
               key={i}
@@ -93,39 +126,62 @@ function RetailerSearchLinks({
               target="_blank"
               rel="noopener noreferrer"
               className={`flex items-center justify-between rounded-xl border p-3.5 transition-colors ${
-                isCheapest ? "border-amber-400/50 bg-amber-500/10" : "border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800/70"
+                isCheapest
+                  ? "border-emerald-400/50 bg-emerald-500/10"
+                  : isSimilar
+                    ? "border-amber-500/20 bg-amber-500/[0.04] hover:bg-amber-500/[0.08]"
+                    : hasPrice
+                      ? "border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800/70"
+                      : "border-zinc-800 bg-zinc-900/30 hover:bg-zinc-800/50"
               }`}
             >
               <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
-                  {rp.retailer.slice(0, 2).toUpperCase()}
-                </span>
+                {hasPrice ? (
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+                ) : isSimilar ? (
+                  <Tags className="h-5 w-5 shrink-0 text-amber-500/70" />
+                ) : (
+                  <Link2 className="h-5 w-5 shrink-0 text-zinc-500" />
+                )}
                 <div>
                   <span className="flex items-center gap-1.5 text-sm font-bold text-zinc-100">
                     {rp.retailer}
                     {isCheapest && (
-                      <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold text-[#0B0B0F]">
+                      <span className="rounded-full bg-emerald-400 px-1.5 py-0.5 text-[9px] font-bold text-[#0B0B0F]">
                         {lang === "ar" ? "الأرخص" : "Cheapest"}
                       </span>
                     )}
                   </span>
-                  <span className="mt-0.5 flex items-center gap-1 text-xs">
-                    {hasPrice ? (
-                      <span className="flex items-center gap-1 text-green-400">
-                        🟢 {lang === "ar" ? "السعر مؤكد" : "Verified price"}
-                        {ago !== null && (
-                          <span className="text-zinc-500">
-                            · {lang === "ar" ? `تم التحقق منذ ${ago} دقيقة` : `checked ${ago}m ago`}
-                          </span>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="flex flex-col text-zinc-500">
-                        <span>⚪ {lang === "ar" ? "السعر غير متاح حاليًا" : "Price not available"}</span>
-                        <span className="text-[10px]">{lang === "ar" ? "قد يتطلب فتح صفحة المنتج" : "May require opening the product page"}</span>
-                      </span>
-                    )}
+                  <span
+                    className={`block text-xs ${
+                      hasPrice ? "text-emerald-400" : isSimilar ? "text-amber-500/80" : "text-zinc-500"
+                    }`}
+                  >
+                    {hasPrice
+                      ? lang === "ar" ? "السعر مؤكد" : "Price confirmed"
+                      : isSimilar
+                        ? lang === "ar" ? "منتج مشابه من نفس الفئة" : "Similar item, same category"
+                        : lang === "ar" ? "السعر غير متاح هنا" : "Price not shown here"}
                   </span>
+                  {hasPrice ? (
+                    <span className="block text-[10px] text-zinc-600">
+                      {rp.inStock === false
+                        ? lang === "ar" ? "غير متوفر حاليًا" : "Out of stock"
+                        : `${lang === "ar" ? "تم التحقق" : "Verified"} ${timeAgoLabel(rp.lastChecked, lang)}`}
+                    </span>
+                  ) : isSimilar ? (
+                    <span className="block text-[10px] leading-snug text-zinc-600">
+                      {lang === "ar"
+                        ? "مش نفس المنتج بالظبط — افتح الرابط للتأكد قبل الشراء"
+                        : "Not the exact same product — open the link to double-check before buying"}
+                    </span>
+                  ) : (
+                    <span className="block text-[10px] leading-snug text-zinc-600">
+                      {lang === "ar"
+                        ? "السعر متاح في صفحة المنتج نفسها — افتح الرابط لمعرفته"
+                        : "The price is on the product's own page — open the link to see it"}
+                    </span>
+                  )}
                 </div>
               </div>
               {hasPrice ? (
@@ -133,8 +189,9 @@ function RetailerSearchLinks({
                   <p className="font-bold text-zinc-100">{Math.round(rp.price as number).toLocaleString()} {rp.currency}</p>
                 </div>
               ) : (
-                <span className="flex shrink-0 items-center gap-1 text-[11px] text-blue-400">
-                  {lang === "ar" ? "فتح المنتج" : "Open product"} <ExternalLink className="h-3.5 w-3.5" />
+                <span className={`flex shrink-0 items-center gap-1 text-[11px] font-bold ${isSimilar ? "text-amber-500/90" : "text-sky-400"}`}>
+                  {lang === "ar" ? "فتح المنتج" : "Open product"}
+                  <ExternalLink className="h-3.5 w-3.5" />
                 </span>
               )}
             </a>
@@ -144,63 +201,9 @@ function RetailerSearchLinks({
 
       <p className="mt-3.5 text-[11px] leading-relaxed text-zinc-500">
         {lang === "ar"
-          ? "كل لينك بيوديك مباشرة لصفحة المنتج الفعلية اللي لقيناها — مش صفحة بحث عامة. بعض الروابط شراكة تجارية، وده مش بيأثر على ترتيب أو تقييم 'قرار' للصفقة."
-          : "Each link takes you straight to the actual product page we found — never a generic search page. Some links are commercial partnerships; this doesn't affect Qarari's ranking or rating of the deal."}
+          ? "كل لينك بيوديك مباشرة لأول منتج فعلي لقيناه في نتائج البحث بالمتجر ده — مش صفحة بحث عامة. لو معرفناش نقرا السعر حيًا من صفحة المتجر، بنورّيك اللينك برضه من غير رقم بدل ما نخمّن. بعض الروابط شراكة تجارية، وده مش بيأثر على ترتيب أو تقييم 'قرار' للصفقة."
+          : "Each link takes you straight to the actual first product we found in that store's search results — not a generic search page. If we couldn't read a live price off the store's page, we still show the link without a number rather than guess. Some links are commercial partnerships; this doesn't affect Qarari's ranking or rating of the deal."}
       </p>
-    </div>
-  );
-}
-
-// ---- "منتجات مشابهة" — similar-product fallback ----
-// Renders ONLY when the exact requested product couldn't be confirmed on any
-// store (report.retailerPrices is empty and report.similarProducts is not).
-// Every entry here is explicitly a different/related product — never
-// presented as if it were the requested item.
-function SimilarProductsFallback({
-  similarProducts,
-  lang,
-}: {
-  similarProducts: { retailer: string; url: string; price?: number | null; currency?: string }[];
-  lang: "ar" | "en";
-}) {
-  if (!similarProducts || similarProducts.length === 0) return null;
-
-  return (
-    <div className="mb-4 rounded-xl border border-amber-500/10 bg-[#0B0B0F] p-5">
-      <h2 className="flex items-center gap-2 font-serif text-lg font-bold text-zinc-300">
-        🟡 {lang === "ar" ? "منتجات مشابهة" : "Similar products"}
-      </h2>
-      <p className="mt-1 mb-4 text-xs text-zinc-500">
-        {lang === "ar"
-          ? "ملقيناش المنتج المطلوب بالضبط، لكن لقينا منتجات مشابهة ممكن تناسبك"
-          : "We couldn't find the exact product, but found similar options that might suit you"}
-      </p>
-
-      <div className="space-y-2.5">
-        {similarProducts.map((sp, i) => (
-          <a
-            key={i}
-            href={sp.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-between rounded-xl border border-zinc-700 bg-zinc-800/40 p-3.5 transition-colors hover:bg-zinc-800/70"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-700 text-xs font-bold text-zinc-200">
-                {sp.retailer.slice(0, 2).toUpperCase()}
-              </span>
-              <span className="text-sm font-bold text-zinc-100">{sp.retailer}</span>
-            </div>
-            {typeof sp.price === "number" ? (
-              <p className="font-bold text-zinc-200">{Math.round(sp.price).toLocaleString()} {sp.currency}</p>
-            ) : (
-              <span className="flex shrink-0 items-center gap-1 text-[11px] text-blue-400">
-                {lang === "ar" ? "فتح المنتج" : "Open product"} <ExternalLink className="h-3.5 w-3.5" />
-              </span>
-            )}
-          </a>
-        ))}
-      </div>
     </div>
   );
 }
@@ -338,18 +341,9 @@ export function ReportScreen() {
           )}
         </div>
 
-        {/* Real store comparison — exact-product matches only */}
+        {/* Real store comparison */}
         {report.retailerPrices && report.retailerPrices.length > 0 && (
-          <RetailerSearchLinks
-            retailerPrices={report.retailerPrices}
-            priceSearchSummary={report.priceSearchSummary}
-            lang={lang}
-          />
-        )}
-
-        {/* Fallback: exact product not found anywhere — similar products only */}
-        {(!report.retailerPrices || report.retailerPrices.length === 0) && report.similarProducts && report.similarProducts.length > 0 && (
-          <SimilarProductsFallback similarProducts={report.similarProducts} lang={lang} />
+          <RetailerSearchLinks retailerPrices={report.retailerPrices} lang={lang} />
         )}
 
         {/* CTA: now that they know a price, let them get an actual verdict */}
@@ -591,19 +585,10 @@ export function ReportScreen() {
         )}
       </div>
 
-      {/* Exact-product store comparison — Jumia/Amazon/Noon/optionally
-          B.TECH, with a real live verified price shown per store when resolved */}
+      {/* "Search the best price yourself" — Jumia/Amazon/Noon/optionally
+          B.TECH, with a real live price shown per store when resolved */}
       {report.retailerPrices && report.retailerPrices.length > 0 && (
-        <RetailerSearchLinks
-          retailerPrices={report.retailerPrices}
-          priceSearchSummary={report.priceSearchSummary}
-          lang={lang}
-        />
-      )}
-
-      {/* Fallback: exact product not found anywhere — similar products only */}
-      {(!report.retailerPrices || report.retailerPrices.length === 0) && report.similarProducts && report.similarProducts.length > 0 && (
-        <SimilarProductsFallback similarProducts={report.similarProducts} lang={lang} />
+        <RetailerSearchLinks retailerPrices={report.retailerPrices} lang={lang} />
       )}
 
       {/* Community Radar — REAL data with enhanced social proof */}

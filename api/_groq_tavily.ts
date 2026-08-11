@@ -1283,15 +1283,12 @@ function pickBroadRetailerLinks(
     const domain = urlDomain(r.url);
     if (!domain || isLikelyNonRetailer(domain) || seenDomains.has(domain)) continue;
     if (!matchesProduct(`${r.title} ${r.content}`, tokens)) continue;
-    if (isListingPageUrl(r.url)) continue; // a category/search page, even one that mentions the product, is never an exact-product link
 
     seenDomains.add(domain);
     links.push({
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain.replace(/^www\./, ""),
       url: r.url,
-      matchType: "EXACT",
-      isExact: true,
-      matchConfidence: "medium", // broad/unrestricted search, so slightly lower confidence than the fixed-domain path
+      matched: true, // already passed matchesProduct() above
     });
     if (links.length >= maxLinks) break;
   }
@@ -1326,62 +1323,13 @@ export async function fetchMainProductRetailerLinks(
     const seenDomains = new Set(fixedLinks.map((l) => urlDomain(l.url)));
     const broadLinks = pickBroadRetailerLinks(broadResults, searchProduct, seenDomains, 8);
 
-    // Only EXACT-product links are returned here — a domain with no
-    // confirmed product page is simply absent, never backfilled with a
-    // plain store-search URL passed off as the product's own page. Callers
-    // that want a fallback when this list is empty should use
-    // fetchSimilarProductFallbackLinks, which returns clearly-labeled
-    // SIMILAR results instead.
-    return [...fixedLinks, ...broadLinks];
-  } catch (e) {
-    console.error("[fetchMainProductRetailerLinks] failed (non-fatal):", e);
-    return [];
-  }
-}
+    const combined = [...fixedLinks, ...broadLinks];
+    if (combined.length > 0) return combined;
 
-/**
- * ONLY-AS-FALLBACK path: called by the caller when fetchMainProductRetailerLinks
- * returned zero exact matches. Reuses the same broad-search results but with
- * relaxed matching (brand + first couple of significant tokens only, instead
- * of every token) so it can surface the closest related products instead of
- * the literal requested variant — then labels every result SIMILAR so it can
- * never be confused with an exact match downstream.
- */
-export async function fetchSimilarProductFallbackLinks(
-  product: string,
-  currency: string,
-  condition: "new" | "likeNew" | "used"
-): Promise<RetailerLink[]> {
-  try {
-    const searchProduct = await normalizeProductNameForSearch(product);
-    const region = getRegionForCurrency(currency);
-    const results = await fetchBroadListings(searchProduct, currency, region, condition);
-
-    const relaxedTokens = getSignificantTokens(searchProduct).slice(0, 2); // brand + first spec word, not the full variant
-    const seenDomains = new Set<string>();
-    const links: RetailerLink[] = [];
-
-    for (const r of results) {
-      if (!r.url) continue;
-      const domain = urlDomain(r.url);
-      if (!domain || isLikelyNonRetailer(domain) || seenDomains.has(domain)) continue;
-      if (relaxedTokens.length > 0 && !matchesProduct(`${r.title} ${r.content}`, relaxedTokens)) continue;
-      // Listing/category pages ARE acceptable here — "similar products" is
-      // explicitly allowed to be a browse page, unlike an exact match.
-      seenDomains.add(domain);
-      links.push({
-        retailer: RETAILER_DISPLAY_NAMES[domain] || domain.replace(/^www\./, ""),
-        url: r.url,
-        matchType: "SIMILAR",
-        isExact: false,
-        matchConfidence: "low",
-      });
-      if (links.length >= 4) break;
-    }
-    return links;
-  } catch (e) {
-    console.error("[fetchSimilarProductFallbackLinks] failed (non-fatal):", e);
-    return [];
+    // Serper returned nothing at all for either query — fall back to plain
+    // store-search links for the known domains so the UI still has
+    // something to show rather than an empty list.
+    return buildRetailerSearchLinks(product, currency, condition);
   }
 }
 
@@ -1438,15 +1386,17 @@ export function attachSearchLinksToAlternatives(
 export interface RetailerLink {
   retailer: string;
   url: string;
-  // ─── Exact-product matching (see isListingPageUrl / pickDirectRetailerLinks) ───
-  // EXACT: the URL is believed to point at this specific product's own page.
-  // SIMILAR: fallback result shown only when no store had the exact product.
-  // NOT_FOUND is never present in the returned array — a store that can't
-  // confirm an exact product page is simply omitted rather than included
-  // with a fabricated "match".
-  matchType?: "EXACT" | "SIMILAR";
-  isExact?: boolean;
-  matchConfidence?: "high" | "medium" | "low";
+  // true  = Serper's own result title/snippet for this URL was checked
+  //         against the product's significant tokens and it's confirmed to
+  //         be THIS product's page.
+  // false = the link is real (came back from a live search hit) but its
+  //         title/snippet didn't match the exact product — most likely a
+  //         similar model / same-category alternative, not this exact item.
+  //         The UI must label these as "similar product", never show a
+  //         price next to them as if it were confirmed for the exact item.
+  // undefined = legacy path (buildRetailerSearchLinks last-resort fallback)
+  //         where no live hit exists at all — kept for backward compat only.
+  matched?: boolean;
 }
 
 // Friendly display names for each retailer domain.
@@ -1541,6 +1491,11 @@ export function buildRetailerSearchLinks(
   return visibleDomains.map((domain) => ({
     retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
     url: buildStoreSearchUrl(domain, product),
+    // This is a constructed in-site SEARCH page, not a link to any specific
+    // product — only ever used when Serper returned literally nothing for
+    // this product (see fetchMainProductRetailerLinks). matched: false so
+    // the UI never presents it as a confirmed product page.
+    matched: false,
   }));
 }
 
@@ -1552,59 +1507,22 @@ function urlDomain(url: string): string {
   }
 }
 
-// ─── Search/category/listing page rejection ───
-// A URL like "amazon.eg/s?k=..." or "jumia.com.eg/catalog/?q=..." looks like
-// a legitimate hit but is NOT a specific product's page — it's a results
-// page that can change every time the underlying catalog changes. Per the
-// "exact product URL" requirement, these must never be presented as if they
-// were the requested product's own page. This checks both generic
-// path/query patterns common across storefront platforms AND, for known
-// domains, whether the URL matches the exact shape that
-// RETAILER_SEARCH_URL_BUILDERS itself would generate for a query — since a
-// hit that structurally IS that store's search endpoint is unambiguously a
-// listing page regardless of what happens to be in its query string.
-const LISTING_PAGE_PATTERNS: RegExp[] = [
-  /\/s(?:\/|\?|$)/i,                 // amazon-style /s?k=...
-  /\/search(?:\/|\?|$)/i,
-  /\/catalogsearch\//i,
-  /\/catalog\/?(\?|$)/i,
-  /[?&](q|query|k|keyword|nkw)=/i,
-  /\/(category|categories|c)\//i,
-  /\/brand\//i,
-  /\/collections?\//i,
-  /\/sch\/i\.html/i,                 // ebay search
-];
-
-function isListingPageUrl(url: string): boolean {
-  let path = "";
-  let search = "";
-  try {
-    const parsed = new URL(url);
-    path = parsed.pathname;
-    search = parsed.search;
-  } catch {
-    return true; // can't parse it — don't trust it as a product page
-  }
-  const full = path + search;
-  return LISTING_PAGE_PATTERNS.some((re) => re.test(full));
-}
-
 /**
  * Picks a direct link to the actual first listing Serper found for each
  * target retailer domain, using Serper results already fetched for a
  * marketplace-scoped query (no extra API call).
  *
- * A hit only counts as the EXACT product when BOTH:
- *   1. Its title+content mentions every significant token of the product
- *      name (matchesProduct — same check the broad-discovery path uses).
- *   2. Its URL doesn't look like a search/category/listing page
- *      (isListingPageUrl).
+ * A domain only makes it into the returned list if Serper actually returned
+ * a real hit for it — we never fabricate a store-search/listing URL and
+ * present it as if it were the product's own page (that used to happen via
+ * buildStoreSearchUrl here; it's been removed). A store we found nothing
+ * for is simply omitted rather than shown with a fake "search page" link
+ * that isn't guaranteed to open, let alone show the right item.
  *
- * A domain that Serper returned nothing usable for is simply OMITTED here
- * (not backfilled with a plain store-search URL) — presenting a search page
- * as if it were the product's own page is exactly what this must not do.
- * The caller (fetchMainProductRetailerLinks) is responsible for deciding
- * what to show when a domain has no exact match — never this function.
+ * Each surviving hit is also checked against the product's significant
+ * tokens (same whole-word matcher pickBroadRetailerLinks uses) and tagged
+ * `matched: true/false` so the UI can tell a confirmed exact-product page
+ * apart from a same-domain hit that's actually a similar/alternate model.
  */
 export function pickDirectRetailerLinks(
   serperResults: SerperResult[],
@@ -1622,19 +1540,12 @@ export function pickDirectRetailerLinks(
 
   const links: RetailerLink[] = [];
   for (const domain of visibleDomains) {
-    const hit = serperResults.find(
-      (r) =>
-        urlDomain(r.url).endsWith(domain) &&
-        matchesProduct(`${r.title} ${r.content}`, tokens) &&
-        !isListingPageUrl(r.url)
-    );
-    if (!hit) continue; // no confirmed exact-product page for this domain — omit, don't fabricate
+    const hit = serperResults.find((r) => urlDomain(r.url).endsWith(domain));
+    if (!hit) continue; // no real hit for this store — omit it, never fabricate a link
     links.push({
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
       url: hit.url,
-      matchType: "EXACT",
-      isExact: true,
-      matchConfidence: "high",
+      matched: matchesProduct(`${hit.title} ${hit.content}`, tokens),
     });
   }
   return links;

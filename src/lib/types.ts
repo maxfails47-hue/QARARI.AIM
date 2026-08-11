@@ -74,24 +74,12 @@ interface AnalysisResultBase {
     currency?: string;
     inStock?: boolean | null;
     lastChecked?: string;
-    // Every entry here already passed exact-product matching + listing-page
-    // rejection server-side (see api/_groq_tavily.ts) — matchType is always
-    // "EXACT" in this array. priceStatus mirrors whether `price` resolved.
-    matchType?: "EXACT" | "SIMILAR";
-    isExact?: boolean;
-    priceStatus?: "VERIFIED" | "UNAVAILABLE";
+    // false = this URL is a real, reachable page but Serper's own snippet
+    // for it didn't match the exact product — treat as a similar item /
+    // same-category alternative, never as a confirmed price for the exact
+    // product. Undefined/true = confirmed match (or legacy data).
+    matched?: boolean;
   }[];
-  // Populated ONLY when retailerPrices is empty — the exact product couldn't
-  // be confirmed on any store, so these are clearly-labeled closest matches,
-  // never mixed into retailerPrices itself.
-  similarProducts?: {
-    retailer: string;
-    url: string;
-    price?: number | null;
-    currency?: string;
-    matchType?: "EXACT" | "SIMILAR";
-  }[];
-  priceSearchSummary?: { searched: number; verified: number; unavailable: number };
   productImage?: string | null;
   createdAt: number;
 }
