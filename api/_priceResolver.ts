@@ -480,6 +480,45 @@ const SCRAPERAPI_PROXY = SCRAPERAPI_KEY
     }
   : null;
 
+// ─── ScraperAPI concurrency limiter ───
+// Trial/lower-tier ScraperAPI plans cap how many requests can be IN FLIGHT
+// at once (their "concurrent threads" limit) — up to 8 links now all try
+// ScraperAPI simultaneously (see proxyOrderFor), which was blowing straight
+// past that cap: only the first few requests that happened to land got
+// through, and the rest came back HTTP 429 "too many simultaneous
+// requests" instantly, with zero retry. That 429 was being treated as a
+// normal miss and falling through to jina/allorigins — exactly why some
+// stores kept resolving and others (essentially at random, whoever the
+// queue picked) didn't.
+// This queues ScraperAPI calls so only SCRAPERAPI_MAX_CONCURRENT run at
+// once; the rest simply wait their turn instead of getting rejected. Trial
+// plans are commonly capped at 1-5 concurrent threads — 2 is a
+// conservative default that should clear a 429-free run on most trial
+// tiers without needing to know the exact number. Only gates ScraperAPI
+// calls; jina/allorigins/direct-fetch aren't subject to this limit.
+const SCRAPERAPI_MAX_CONCURRENT = 3;
+let scraperApiInFlight = 0;
+const scraperApiQueue: (() => void)[] = [];
+
+function acquireScraperApiSlot(): Promise<void> {
+  if (scraperApiInFlight < SCRAPERAPI_MAX_CONCURRENT) {
+    scraperApiInFlight++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    scraperApiQueue.push(() => {
+      scraperApiInFlight++;
+      resolve();
+    });
+  });
+}
+
+function releaseScraperApiSlot(): void {
+  scraperApiInFlight--;
+  const next = scraperApiQueue.shift();
+  if (next) next();
+}
+
 const READER_PROXIES: { name: string; build: (url: string) => string; timeoutMs?: number }[] = [
   { name: "jina", build: (url) => `https://r.jina.ai/${url}` },
   { name: "allorigins", build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
@@ -514,6 +553,11 @@ async function fetchViaReaderProxy(url: string): Promise<string | null> {
   // one of the known-hard ones.
   const proxies = proxyOrderFor(url);
   for (const proxy of proxies) {
+    const isScraperApi = proxy.name === "scraperapi";
+    // Gate ScraperAPI specifically behind the concurrency limiter — see
+    // acquireScraperApiSlot above. jina/allorigins aren't rate-limited
+    // this way, so they skip straight through.
+    if (isScraperApi) await acquireScraperApiSlot();
     const controller = new AbortController();
     const timeoutMs = proxy.timeoutMs ?? READER_PROXY_TIMEOUT_MS;
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -532,6 +576,30 @@ async function fetchViaReaderProxy(url: string): Promise<string | null> {
         let bodySnippet = "";
         try { bodySnippet = (await res.text()).slice(0, 200); } catch { /* ignore */ }
         console.log(`[reader-proxy:${proxy.name}] HTTP ${res.status} for ${url} — ${bodySnippet}`);
+        // A 429 specifically means we still exceeded the concurrency cap
+        // despite the limiter (SCRAPERAPI_MAX_CONCURRENT set too high for
+        // this plan) — one retry after a short wait, still inside this
+        // same slot, is cheap insurance against losing the store entirely
+        // to a race at the exact moment the limiter released it.
+        if (isScraperApi && res.status === 429) {
+          await new Promise((r) => setTimeout(r, 1500));
+          try {
+            const retryController = new AbortController();
+            const retryTimeout = setTimeout(() => retryController.abort(), timeoutMs);
+            const retryRes = await fetch(proxy.build(url), {
+              signal: retryController.signal,
+              headers: { Accept: "text/plain,text/html" },
+            });
+            clearTimeout(retryTimeout);
+            if (retryRes.ok) {
+              const retryText = await retryRes.text();
+              if (retryText && retryText.length > 40 && !looksLikeBlockPage(retryText)) {
+                console.log(`[reader-proxy:scraperapi] retry OK, ${retryText.length} chars for ${url}`);
+                return retryText.slice(0, MAX_HTML_BYTES);
+              }
+            }
+          } catch { /* retry failed too — fall through below */ }
+        }
         continue; // try the next proxy
       }
       const text = await res.text();
@@ -551,6 +619,7 @@ async function fetchViaReaderProxy(url: string): Promise<string | null> {
       console.log(`[reader-proxy:${proxy.name}] threw: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       clearTimeout(timeout);
+      if (isScraperApi) releaseScraperApiSlot();
     }
   }
   return null;
