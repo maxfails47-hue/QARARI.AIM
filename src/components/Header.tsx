@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { Globe, History, User, Sparkles, Plus, Bell, MoreVertical } from "lucide-react";
+import { Globe, History, User, Sparkles, Plus, Bell, MoreVertical, Crown } from "lucide-react";
 import { HeaderInstallButton } from "@/components/HeaderInstallButton";
 
 export function Header() {
@@ -59,6 +59,15 @@ export function Header() {
             title={t("history")}
           >
             <History className="h-5 w-5" />
+          </button>
+          <button
+            onClick={() => navigate("upgrade")}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+              screen === "upgrade" ? "bg-amber-500/15 text-amber-400" : "text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-400"
+            }`}
+            title={t("premium")}
+          >
+            <Crown className="h-5 w-5" />
           </button>
           <button
             onClick={() => navigate(user ? "profile" : "login")}
