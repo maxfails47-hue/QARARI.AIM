@@ -58,13 +58,13 @@ const READER_PROXY_TIMEOUT_MS = 7000;
 // Raised from 9500 -> 13500 to leave room for the new reader-proxy tier
 // (only reached when the first three tiers all miss) without starving it
 // of a fair timeout of its own.
-// Raised from 13500 -> 26000 to give the ScraperAPI render=true tier
-// (SCRAPERAPI_TIMEOUT_MS = 20000, only reached as an absolute last resort
-// after jina/allorigins/AI have all already missed) enough room to actually
-// finish instead of being cut off by this outer cap before it ever gets a
-// chance to respond. Still bounded — every link resolves in parallel, so
-// this only affects the wall-clock time of whichever single store is
-// slowest, not the whole report.
+// Raised from 13500 -> 26000. With the heavy-domain fast path below
+// (known hard domains skip straight to ScraperAPI instead of burning time
+// on jina/allorigins first), ScraperAPI's full 20000ms budget now fits
+// comfortably inside this cap without needing the much larger 48000ms this
+// constant briefly held — that larger value would have pushed whole-report
+// time uncomfortably close to Vercel's function timeout. Still bounded per
+// link and resolved in parallel across links.
 const PER_LINK_HARD_CAP_MS = 26000;
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
 
@@ -469,23 +469,46 @@ const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY || "";
 // ever benefiting from it. It gets its own, longer budget instead.
 const SCRAPERAPI_TIMEOUT_MS = 20000;
 
+const SCRAPERAPI_PROXY = SCRAPERAPI_KEY
+  ? {
+      name: "scraperapi",
+      build: (url: string) =>
+        `https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(url)}&render=true`,
+      timeoutMs: SCRAPERAPI_TIMEOUT_MS,
+    }
+  : null;
+
 const READER_PROXIES: { name: string; build: (url: string) => string; timeoutMs?: number }[] = [
   { name: "jina", build: (url) => `https://r.jina.ai/${url}` },
   { name: "allorigins", build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
-  ...(SCRAPERAPI_KEY
-    ? [
-        {
-          name: "scraperapi",
-          build: (url: string) =>
-            `https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(url)}&render=true`,
-          timeoutMs: SCRAPERAPI_TIMEOUT_MS,
-        },
-      ]
-    : []),
+  ...(SCRAPERAPI_PROXY ? [SCRAPERAPI_PROXY] : []),
 ];
 
+// Big-name retailers with strong, well-documented anti-bot protection
+// (Cloudflare/Akamai-grade challenges, IP+UA fingerprinting) where the free
+// jina/allorigins proxies essentially never get through — trying them first
+// just burns ~14s of the per-link time budget for a near-guaranteed miss,
+// which used to starve ScraperAPI (the tier that actually stands a chance)
+// of enough remaining time to finish before PER_LINK_HARD_CAP_MS cut it
+// off. For these domains specifically, skip straight to ScraperAPI so it
+// gets its full timeout budget instead of the leftovers.
+const HEAVY_PROTECTION_DOMAINS = [
+  "amazon", "noon.com", "jumia", "dubizzle", "eshop.orange.eg", "carrefoureg",
+];
+
+function isHeavilyProtected(url: string): boolean {
+  const host = hostnameOf(url).toLowerCase();
+  return HEAVY_PROTECTION_DOMAINS.some((d) => host.includes(d));
+}
+
 async function fetchViaReaderProxy(url: string): Promise<string | null> {
-  for (const proxy of READER_PROXIES) {
+  // Known-hard domain + we actually have a ScraperAPI key: go straight to
+  // it and skip the free proxies that would otherwise eat their timeout
+  // budget for nothing. Falls through to the normal ordered list below only
+  // if there's no key configured (nothing to skip to) or the domain isn't
+  // one of the known-hard ones.
+  const proxies = isHeavilyProtected(url) && SCRAPERAPI_PROXY ? [SCRAPERAPI_PROXY] : READER_PROXIES;
+  for (const proxy of proxies) {
     const controller = new AbortController();
     const timeoutMs = proxy.timeoutMs ?? READER_PROXY_TIMEOUT_MS;
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -495,7 +518,17 @@ async function fetchViaReaderProxy(url: string): Promise<string | null> {
         headers: { Accept: "text/plain,text/html" },
       });
       clearTimeout(timeout);
-      if (!res.ok) continue; // try the next proxy
+      if (!res.ok) {
+        // Log WHY this proxy failed — critical for ScraperAPI specifically,
+        // since a bad/expired key or exhausted quota comes back as a non-200
+        // (401/403 for auth, 500/403 for quota depending on plan) that was
+        // previously swallowed here with zero visibility. Read a short body
+        // snippet too since ScraperAPI puts the actual reason in the body.
+        let bodySnippet = "";
+        try { bodySnippet = (await res.text()).slice(0, 200); } catch { /* ignore */ }
+        console.log(`[reader-proxy:${proxy.name}] HTTP ${res.status} for ${url} — ${bodySnippet}`);
+        continue; // try the next proxy
+      }
       const text = await res.text();
       // A proxy can return 200 OK while actually handing back the TARGET
       // site's own anti-bot interstitial (captcha/"access denied"/etc.) —
@@ -503,11 +536,14 @@ async function fetchViaReaderProxy(url: string): Promise<string | null> {
       // proxy and fall through to the next one (ultimately reaching
       // ScraperAPI) instead of returning it as if it were usable content.
       if (text && text.length > 40 && !looksLikeBlockPage(text)) {
+        console.log(`[reader-proxy:${proxy.name}] OK, ${text.length} chars for ${url}`);
         return text.slice(0, MAX_HTML_BYTES);
       }
-    } catch {
+      console.log(`[reader-proxy:${proxy.name}] got ${text?.length ?? 0} chars but looked like a block page / too short for ${url}`);
+    } catch (err) {
       // timeout, network error, or this proxy itself got blocked — fall
       // through to the next one rather than giving up entirely
+      console.log(`[reader-proxy:${proxy.name}] threw: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       clearTimeout(timeout);
     }
@@ -693,7 +729,9 @@ export async function resolvePricesForLinks(
 ): Promise<ResolvedStorePrice[]> {
   const capped = links.slice(0, MAX_LINKS_TO_RESOLVE);
   const settled = await Promise.allSettled(
-    capped.map((link) => resolveOne(link, currency, knownBadDomains.has(hostnameOf(link.url))))
+    capped.map((link) =>
+      resolveOne(link, currency, knownBadDomains.has(hostnameOf(link.url)) || isHeavilyProtected(link.url))
+    )
   );
   return settled.map((r, i) =>
     r.status === "fulfilled"
