@@ -39,6 +39,11 @@ export interface ResolvedStorePrice {
   imageUrl: string | null; // product photo, when the page's own JSON-LD/meta has one — never AI-generated
   lastChecked: string; // ISO timestamp
   source: "jsonld" | "meta" | "embedded-state" | "ai" | "ai-rendered" | "unresolved";
+  // Carried straight through from the input RetailerLink — whether `url` is
+  // a verified product page vs a plain store-search fallback. Independent
+  // of `price`: a direct product page can still resolve price: null (store
+  // blocks scraping), and that must NOT be confused with the fallback case.
+  isDirectProduct: boolean;
 }
 
 const FETCH_TIMEOUT_MS = 6000;
@@ -439,7 +444,7 @@ async function extractViaAi(html: string, retailer: string, currency: string): P
 
 async function resolveOneInner(link: RetailerLink, currency: string, preferReaderProxy: boolean): Promise<ResolvedStorePrice> {
   const lastChecked = new Date().toISOString();
-  const base = { retailer: link.retailer, url: link.url, currency, lastChecked };
+  const base = { retailer: link.retailer, url: link.url, currency, lastChecked, isDirectProduct: link.isDirectProduct };
 
   // Domains with a known-poor plain-fetch success rate (see
   // _domainHealth.ts — loaded from cumulative history, not a guess) skip
@@ -537,6 +542,7 @@ async function resolveOne(link: RetailerLink, currency: string, preferReaderProx
     imageUrl: null,
     lastChecked: new Date().toISOString(),
     source: "unresolved",
+    isDirectProduct: link.isDirectProduct,
   };
   return Promise.race([
     resolveOneInner(link, currency, preferReaderProxy),
@@ -586,6 +592,7 @@ export async function resolvePricesForLinks(
           imageUrl: null,
           lastChecked: new Date().toISOString(),
           source: "unresolved" as const,
+          isDirectProduct: capped[i].isDirectProduct,
         }
   );
 }

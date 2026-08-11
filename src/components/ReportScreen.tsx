@@ -23,7 +23,7 @@ function RetailerSearchLinks({
   retailerPrices,
   lang,
 }: {
-  retailerPrices: { retailer: string; url: string; price?: number | null; currency?: string; inStock?: boolean | null }[];
+  retailerPrices: { retailer: string; url: string; price?: number | null; currency?: string; inStock?: boolean | null; isDirectProduct?: boolean }[];
   lang: "ar" | "en";
 }) {
   const visibleLinks = retailerPrices.filter(
@@ -35,9 +35,19 @@ function RetailerSearchLinks({
   // Smart sorting: stores with a real verified price float to the top
   // ("أفضل الأسعار المتاحة"); stores whose price we couldn't read (store
   // protection, e.g. Amazon/Noon) are separated into their own section
-  // ("متاجر تتطلب زيارة الموقع") so the primary list stays clean.
+  // ("متاجر تتطلب زيارة الموقع") so the primary list stays clean. Within
+  // that unpriced group, a further split by isDirectProduct decides the CTA
+  // wording: a verified product page we just couldn't price gets "View
+  // price in store" (accurate — it lands on the exact item); a plain
+  // store-search fallback gets "Search for it in [store]" + a "search
+  // result" badge, since it does NOT land on a specific product.
+  // `isDirectProduct === undefined` covers cached/history results saved
+  // before this field existed — treated as a direct product to preserve
+  // their old behavior/wording.
   const pricedLinks = visibleLinks.filter((rp) => typeof rp.price === "number");
   const unpricedLinks = visibleLinks.filter((rp) => typeof rp.price !== "number");
+  const unpricedDirectLinks = unpricedLinks.filter((rp) => rp.isDirectProduct !== false);
+  const unpricedFallbackLinks = unpricedLinks.filter((rp) => rp.isDirectProduct === false);
 
   const cheapestPrice = pricedLinks.reduce<number | null>((min, rp) => {
     if (typeof rp.price !== "number") return min;
@@ -114,34 +124,50 @@ function RetailerSearchLinks({
             <span className="h-px flex-1 bg-zinc-700/60" />
           </div>
           <div className="space-y-2.5">
-            {unpricedLinks.map((rp, i) => (
-              <a
-                key={i}
-                href={rp.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-800/40 p-3.5 transition-colors hover:bg-zinc-800/70"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
-                    {rp.retailer.slice(0, 2).toUpperCase()}
+            {[...unpricedDirectLinks, ...unpricedFallbackLinks].map((rp, i) => {
+              const isFallback = rp.isDirectProduct === false;
+              return (
+                <a
+                  key={i}
+                  href={rp.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-800/40 p-3.5 transition-colors hover:bg-zinc-800/70"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-600 text-xs font-bold text-[#0B0B0F]">
+                      {rp.retailer.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="flex items-center gap-1.5 truncate text-sm font-bold text-zinc-100">
+                      {rp.retailer}
+                      {isFallback && (
+                        <span className="rounded-full bg-zinc-700 px-1.5 py-0.5 text-[9px] font-bold text-zinc-300">
+                          {lang === "ar" ? "نتيجة بحث" : "Search result"}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-400 px-3.5 py-2 text-xs font-bold text-[#0B0B0F] transition-colors hover:bg-amber-300">
+                    {isFallback
+                      ? (lang === "ar" ? `دور عليه في ${rp.retailer}` : `Search for it in ${rp.retailer}`)
+                      : (lang === "ar" ? "عرض السعر في المتجر" : "View price in store")}
+                    <ExternalLink className="h-3.5 w-3.5" />
                   </span>
-                  <span className="truncate text-sm font-bold text-zinc-100">{rp.retailer}</span>
-                </div>
-                <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-400 px-3.5 py-2 text-xs font-bold text-[#0B0B0F] transition-colors hover:bg-amber-300">
-                  {lang === "ar" ? "عرض السعر في المتجر" : "View price in store"}
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </span>
-              </a>
-            ))}
+                </a>
+              );
+            })}
           </div>
         </>
       )}
 
       <p className="mt-3.5 text-[11px] leading-relaxed text-zinc-500">
-        {lang === "ar"
-          ? "جميع الروابط موجهة لأول منتج مطابق في بحث المتجر."
-          : "All links point to the first matching product in the store's search."}
+        {unpricedFallbackLinks.length > 0
+          ? lang === "ar"
+            ? "الروابط تودّيك مباشرة على صفحة المنتج، ما عدا الروابط اللي عليها \"نتيجة بحث\" فهي بتودّيك على نتائج البحث في المتجر."
+            : "Links go straight to the product page, except links marked \"Search result\", which open the store's search results instead."
+          : lang === "ar"
+            ? "جميع الروابط موجهة مباشرة لصفحة المنتج في المتجر."
+            : "All links point directly to the product page in the store."}
       </p>
     </div>
   );

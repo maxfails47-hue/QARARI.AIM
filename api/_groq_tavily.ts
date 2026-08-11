@@ -1295,6 +1295,7 @@ function pickBroadRetailerLinks(
     links.push({
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain.replace(/^www\./, ""),
       url: verifiedUrl,
+      isDirectProduct: true,
     });
     if (links.length >= maxLinks) break;
   }
@@ -1392,6 +1393,15 @@ export function attachSearchLinksToAlternatives(
 export interface RetailerLink {
   retailer: string;
   url: string;
+  // True when `url` was verified as an actual single product page (Serper
+  // hit that passed cleanAndVerifyUrl, or a broad-discovery hit — those are
+  // dropped entirely when unverified, see pickBroadRetailerLinks). False
+  // when it's a plain store-search fallback URL (buildStoreSearchUrl /
+  // buildRetailerSearchLinks) that lands on a search/listing page instead
+  // of the product itself. Independent of whether a price was resolved —
+  // a verified product page can still have isDirectProduct: true with no
+  // price if the store blocks price scraping (e.g. Amazon).
+  isDirectProduct: boolean;
 }
 
 // Friendly display names for each retailer domain.
@@ -1486,6 +1496,7 @@ export function buildRetailerSearchLinks(
   return visibleDomains.map((domain) => ({
     retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
     url: buildStoreSearchUrl(domain, product),
+    isDirectProduct: false,
   }));
 }
 
@@ -1527,6 +1538,7 @@ export function pickDirectRetailerLinks(
     return {
       retailer: RETAILER_DISPLAY_NAMES[domain] || domain,
       url: verifiedUrl || buildStoreSearchUrl(domain, product),
+      isDirectProduct: !!verifiedUrl,
     };
   });
 }
