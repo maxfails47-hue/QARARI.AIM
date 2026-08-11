@@ -58,7 +58,14 @@ const READER_PROXY_TIMEOUT_MS = 7000;
 // Raised from 9500 -> 13500 to leave room for the new reader-proxy tier
 // (only reached when the first three tiers all miss) without starving it
 // of a fair timeout of its own.
-const PER_LINK_HARD_CAP_MS = 13500;
+// Raised from 13500 -> 26000 to give the ScraperAPI render=true tier
+// (SCRAPERAPI_TIMEOUT_MS = 20000, only reached as an absolute last resort
+// after jina/allorigins/AI have all already missed) enough room to actually
+// finish instead of being cut off by this outer cap before it ever gets a
+// chance to respond. Still bounded — every link resolves in parallel, so
+// this only affects the wall-clock time of whichever single store is
+// slowest, not the whole report.
+const PER_LINK_HARD_CAP_MS = 26000;
 const MAX_HTML_BYTES = 900_000; // don't buffer a huge page fully into memory
 
 // Rotating pool of realistic desktop UAs. Some retailer sites fingerprint
@@ -152,7 +159,31 @@ async function fetchHtml(url: string): Promise<string | null> {
 }
 
 // ─── 1. JSON-LD (schema.org) ───
-function extractFromJsonLd(html: string): { price: number | null; inStock: boolean | null } | null {
+// Currency-mismatch bug fix: this used to grab ANY numeric price field and
+// hand it back labeled with whatever currency the CALLER expected (EGP),
+// with no check against what currency the source page actually quoted the
+// price in. Global retailer domains (samsung.com, apple.com, etc.) often
+// serve a USD/other-currency price with no Egypt-specific page, so "450"
+// was being shown as "450 EGP" when the page actually said "$450 USD" —
+// wildly wrong, and worse than showing nothing. Now: if the offer carries
+// an explicit priceCurrency and it doesn't match what we expect, we reject
+// the whole result (source stays "unresolved") rather than mislabel it —
+// same "never guess" principle already used everywhere else in this file.
+const CURRENCY_ALIASES: Record<string, string[]> = {
+  EGP: ["egp", "le", "ج.م", "جنيه"],
+  USD: ["usd", "$", "us$"],
+  SAR: ["sar", "sr", "ر.س"],
+  AED: ["aed", "dh", "د.إ"],
+};
+
+function currencyMatches(found: string | null | undefined, expected: string): boolean {
+  if (!found) return true; // no currency info on the page — can't contradict, allow it through
+  const norm = found.toString().trim().toLowerCase();
+  const expectedAliases = CURRENCY_ALIASES[expected.toUpperCase()] || [expected.toLowerCase()];
+  return expectedAliases.some((a) => norm === a.toLowerCase() || norm.includes(a.toLowerCase()));
+}
+
+function extractFromJsonLd(html: string, expectedCurrency: string): { price: number | null; inStock: boolean | null } | null {
   const blocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
   for (const block of blocks) {
     try {
@@ -163,6 +194,8 @@ function extractFromJsonLd(html: string): { price: number | null; inStock: boole
         const rawPrice = offer?.price ?? offer?.lowPrice;
         const price = typeof rawPrice === "string" ? parseFloat(rawPrice.replace(/,/g, "")) : rawPrice;
         if (typeof price === "number" && price > 0) {
+          const offerCurrency: string | undefined = offer?.priceCurrency;
+          if (!currencyMatches(offerCurrency, expectedCurrency)) continue; // wrong currency — skip this offer, try the next node/block
           const availability: string = (offer?.availability || "").toString().toLowerCase();
           const inStock = availability
             ? availability.includes("instock") || availability.includes("in_stock")
@@ -188,12 +221,27 @@ function flattenGraph(nodes: any[]): any[] {
 }
 
 // ─── 2. Meta tags ───
-function extractFromMeta(html: string): { price: number | null; inStock: boolean | null } | null {
+function extractFromMeta(html: string, expectedCurrency: string): { price: number | null; inStock: boolean | null } | null {
   const metaPatterns = [
     /<meta[^>]+(?:property|name)=["'](?:og:price:amount|product:price:amount)["'][^>]+content=["']([\d.,]+)["']/i,
     /<meta[^>]+content=["']([\d.,]+)["'][^>]+(?:property|name)=["'](?:og:price:amount|product:price:amount)["']/i,
     /itemprop=["']price["'][^>]*content=["']([\d.,]+)["']/i,
   ];
+  const currencyPatterns = [
+    /<meta[^>]+(?:property|name)=["'](?:og:price:currency|product:price:currency)["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:price:currency|product:price:currency)["']/i,
+    /itemprop=["']priceCurrency["'][^>]*content=["']([^"']+)["']/i,
+  ];
+  let pageCurrency: string | null = null;
+  for (const re of currencyPatterns) {
+    const m = html.match(re);
+    if (m) {
+      pageCurrency = m[1];
+      break;
+    }
+  }
+  if (!currencyMatches(pageCurrency, expectedCurrency)) return null; // page explicitly quotes a different currency — don't mislabel it
+
   for (const re of metaPatterns) {
     const m = html.match(re);
     if (m) {
@@ -270,15 +318,50 @@ function findPriceInObject(node: any, depth = 0): number | null {
   return null;
 }
 
-function extractFromEmbeddedState(html: string): { price: number | null; inStock: boolean | null } | null {
+const CURRENCY_KEY_RE = /^(currency|pricecurrency|currencycode)$/i;
+
+// Looks for a currency code/symbol living alongside a price field in the
+// same object (sibling key) — the common shape for embedded state blobs
+// (e.g. { price: 450, currency: "USD" }). Returns null (unknown) rather
+// than false when no such sibling exists, since plenty of legitimate
+// EGP-only sites simply don't bother stamping a currency field at all —
+// unknown must stay a "let it through" case, only an actual contradicting
+// value should reject the price (same policy as the JSON-LD/meta tiers).
+function findSiblingCurrency(node: any, depth = 0): string | null {
+  if (depth > 8 || node == null || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findSiblingCurrency(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const hasPriceKey = Object.keys(node).some((k) => PRICE_KEY_RE.test(k));
+  if (hasPriceKey) {
+    for (const key of Object.keys(node)) {
+      if (CURRENCY_KEY_RE.test(key) && typeof node[key] === "string") return node[key];
+    }
+  }
+  for (const key of Object.keys(node)) {
+    const found = findSiblingCurrency(node[key], depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function extractFromEmbeddedState(html: string, expectedCurrency: string): { price: number | null; inStock: boolean | null } | null {
   for (const pattern of STATE_SCRIPT_PATTERNS) {
     const m = html.match(pattern);
     if (!m) continue;
     try {
       const parsed = JSON.parse(m[1].trim());
       const productSubtree = findNamedSubtree(parsed, /^(product|pdp|productdetails|item)$/i);
-      const price = (productSubtree && findPriceInObject(productSubtree)) ?? findPriceInObject(parsed);
-      if (price != null) return { price, inStock: null };
+      const scope = productSubtree ?? parsed;
+      const price = findPriceInObject(scope);
+      if (price == null) continue;
+      const siblingCurrency = findSiblingCurrency(scope);
+      if (!currencyMatches(siblingCurrency, expectedCurrency)) continue; // contradicting currency found — don't mislabel it, try next pattern
+      return { price, inStock: null };
     } catch {
       // Malformed/partial JSON captured by the regex (e.g. a trailing
       // script tag inside a string threw off the lazy match) — try the
@@ -378,8 +461,15 @@ function extractImage(html: string, pageUrl: string): string | null {
 // Silently skipped if SCRAPERAPI_KEY isn't set, so this stays safe to
 // deploy/run without the key configured.
 const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY || "";
+// ScraperAPI with render=true actually executes the page's JS on their
+// infrastructure before responding — that routinely takes 10-20s+, well
+// past READER_PROXY_TIMEOUT_MS (7s, sized for the free text-only proxies).
+// Giving it the standard 7s budget meant it was essentially always timing
+// out before ever getting a response back — paying for the tier without
+// ever benefiting from it. It gets its own, longer budget instead.
+const SCRAPERAPI_TIMEOUT_MS = 20000;
 
-const READER_PROXIES: { name: string; build: (url: string) => string }[] = [
+const READER_PROXIES: { name: string; build: (url: string) => string; timeoutMs?: number }[] = [
   { name: "jina", build: (url) => `https://r.jina.ai/${url}` },
   { name: "allorigins", build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
   ...(SCRAPERAPI_KEY
@@ -388,6 +478,7 @@ const READER_PROXIES: { name: string; build: (url: string) => string }[] = [
           name: "scraperapi",
           build: (url: string) =>
             `https://api.scraperapi.com/?api_key=${SCRAPERAPI_KEY}&url=${encodeURIComponent(url)}&render=true`,
+          timeoutMs: SCRAPERAPI_TIMEOUT_MS,
         },
       ]
     : []),
@@ -396,7 +487,8 @@ const READER_PROXIES: { name: string; build: (url: string) => string }[] = [
 async function fetchViaReaderProxy(url: string): Promise<string | null> {
   for (const proxy of READER_PROXIES) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), READER_PROXY_TIMEOUT_MS);
+    const timeoutMs = proxy.timeoutMs ?? READER_PROXY_TIMEOUT_MS;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(proxy.build(url), {
         signal: controller.signal,
@@ -442,8 +534,11 @@ async function extractViaAi(html: string, retailer: string, currency: string): P
     if (text.length < 40) return null;
     const system =
       "You read raw text scraped from a single e-commerce product page and pull out the CURRENT price and stock status. " +
+      "The caller tells you which currency they expect. Look for an explicit currency symbol/code near the price " +
+      "(EGP, ج.م, LE, $, USD, SAR, AED, etc.). If the page's price is clearly in a DIFFERENT currency than expected, " +
+      "or you cannot tell which currency the price is in, return price: null — do NOT convert or assume it matches. " +
       "Respond with ONLY a JSON object matching the schema. If you cannot find a clear current price for the main " +
-      "product on this page, return price: null. Never guess or estimate — null is the correct answer when unsure.";
+      "product on this page in the expected currency, return price: null. Never guess or estimate — null is the correct answer when unsure.";
     const user = `Retailer: ${retailer}\nExpected currency: ${currency}\n\nPage text:\n${text}`;
     const raw = await callGeminiStructured(system, user, PRICE_SCHEMA, 300);
     const parsed = JSON.parse(raw);
@@ -479,9 +574,9 @@ async function resolveOneInner(link: RetailerLink, currency: string, preferReade
     proxyResult = await fetchViaReaderProxy(link.url);
     if (proxyResult) {
       const imageUrl = extractImage(proxyResult, link.url);
-      const jsonld = extractFromJsonLd(proxyResult);
+      const jsonld = extractFromJsonLd(proxyResult, currency);
       if (jsonld) return { ...base, price: jsonld.price, inStock: jsonld.inStock, imageUrl, source: "jsonld" };
-      const meta = extractFromMeta(proxyResult);
+      const meta = extractFromMeta(proxyResult, currency);
       if (meta) return { ...base, price: meta.price, inStock: meta.inStock, imageUrl, source: "meta" };
       const ai = await extractViaAi(proxyResult, link.retailer, currency);
       if (ai) return { ...base, price: ai.price, inStock: ai.inStock, imageUrl, source: "ai-rendered" };
@@ -511,13 +606,13 @@ async function resolveOneInner(link: RetailerLink, currency: string, preferReade
   // a store can have a clean og:image even if its price needs the AI fallback.
   const imageUrl = extractImage(html, link.url);
 
-  const jsonld = extractFromJsonLd(html);
+  const jsonld = extractFromJsonLd(html, currency);
   if (jsonld) return { ...base, price: jsonld.price, inStock: jsonld.inStock, imageUrl, source: "jsonld" };
 
-  const meta = extractFromMeta(html);
+  const meta = extractFromMeta(html, currency);
   if (meta) return { ...base, price: meta.price, inStock: meta.inStock, imageUrl, source: "meta" };
 
-  const embedded = extractFromEmbeddedState(html);
+  const embedded = extractFromEmbeddedState(html, currency);
   if (embedded) return { ...base, price: embedded.price, inStock: embedded.inStock, imageUrl, source: "embedded-state" };
 
   const ai = await extractViaAi(html, link.retailer, currency);
