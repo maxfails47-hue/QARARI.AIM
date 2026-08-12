@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useApp } from "@/lib/AppContext";
-import { currencies, FREE_MONTHLY_LIMIT, SUPPORT_WHATSAPP } from "@/lib/types";
+import { currencies, FREE_MONTHLY_LIMIT } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   User, Mail, Phone, MapPin, LogOut, Share2, CheckCircle2,
-  Crown, Zap, MessageCircle, ChevronLeft, Copy, Sparkles
+  Crown, Zap, ChevronLeft, Copy, Sparkles
 } from "lucide-react";
 
 export function ProfileScreen() {
@@ -233,24 +233,14 @@ export function ProfileScreen() {
         </div>
       )}
 
-      {/* Support Contact */}
+      {/* Support Contact box removed per product decision — WhatsApp number
+          no longer shown in the app. Replay-onboarding stays, now in its
+          own standalone box. */}
       <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
-        <h3 className="mb-3 text-sm font-bold text-amber-400">{t("contactSupport")}</h3>
-        <p className="mb-3 text-xs text-zinc-500">{t("needHelp")}</p>
-        <div className="flex gap-3">
-          <a
-            href={`https://wa.me/${SUPPORT_WHATSAPP}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-500/10"
-          >
-            <MessageCircle className="h-4 w-4" /> {t("supportWhatsapp")}
-          </a>
-        </div>
         {/* QA/marketing: re-run the first-run onboarding sequence on demand */}
         <button
           onClick={replayOnboarding}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-sm font-medium text-amber-400 transition-colors hover:bg-amber-500/10"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-sm font-medium text-amber-400 transition-colors hover:bg-amber-500/10"
         >
           <Sparkles className="h-4 w-4" /> {t("replayIntro")}
         </button>

@@ -10,15 +10,16 @@ import {
   Shield, Lightbulb, Copy, Share2, Bookmark, Bell,
   ThumbsUp, ThumbsDown, MessageCircle, Mic, Send,
   Sparkles, Users, RefreshCw, DollarSign, Handshake,
-  ExternalLink, ShoppingCart,
+  ExternalLink, ShoppingCart, ArrowLeft, ArrowRight,
 } from "lucide-react";
 
-// ---- "Search the best price yourself" (Jumia/Amazon/Noon/optionally B.TECH) ----
+// ---- "Official places the product is available" (Jumia/Amazon/Noon/optionally B.TECH) ----
 // Renders whenever the report carries at least one store link. Each entry
 // now also carries a REAL live price/stock status when api/analyze.ts
 // managed to resolve one (see api/_priceResolver.ts) — shown next to the
-// link when available; falls back to a plain "view current price" link
-// when a store's price couldn't be read live.
+// link when available; falls back to a "check live price" badge when a
+// store's price couldn't be read live (Serper/priceResolver both came up
+// empty for that domain).
 function RetailerSearchLinks({
   retailerPrices,
   lang,
@@ -37,11 +38,13 @@ function RetailerSearchLinks({
     return min === null ? rp.price : Math.min(min, rp.price);
   }, null);
 
+  const Arrow = lang === "ar" ? ArrowLeft : ArrowRight;
+
   return (
     <div className="mb-4 rounded-xl border border-amber-500/15 bg-[#0B0B0F] p-5">
       <h2 className="flex items-center gap-2 font-serif text-lg font-bold text-amber-400">
         <ShoppingCart className="h-5 w-5" />
-        {lang === "ar" ? "دور على أفضل سعر بنفسك" : "Find the best price yourself"}
+        {lang === "ar" ? "أماكن توفر المنتج الرسمية" : "Official places the product is available"}
       </h2>
       <p className="mt-1 mb-4 text-xs text-zinc-500">
         {lang === "ar"
@@ -60,7 +63,12 @@ function RetailerSearchLinks({
               target="_blank"
               rel="noopener noreferrer"
               className={`flex items-center justify-between rounded-xl border p-3.5 transition-colors ${
-                isCheapest ? "border-amber-400/50 bg-amber-500/10" : "border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800/70"
+                // Cheapest highlight is deliberately NOT the site's gold/amber
+                // brand color (used everywhere else on this card — the
+                // heading, the "check price" badge, the lightbulb box below)
+                // so it reads as its own distinct signal instead of blending
+                // into the rest of the gold accents.
+                isCheapest ? "border-violet-400/50 bg-violet-500/10" : "border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800/70"
               }`}
             >
               <div className="flex items-center gap-3">
@@ -71,39 +79,54 @@ function RetailerSearchLinks({
                   <span className="flex items-center gap-1.5 text-sm font-bold text-zinc-100">
                     {rp.retailer}
                     {isCheapest && (
-                      <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold text-[#0B0B0F]">
+                      <span className="rounded-full bg-violet-400 px-1.5 py-0.5 text-[9px] font-bold text-[#0B0B0F]">
                         {lang === "ar" ? "الأرخص" : "Cheapest"}
                       </span>
                     )}
                   </span>
-                  <span className="block text-xs text-zinc-500">
-                    {hasPrice
-                      ? rp.inStock === false
+                  {hasPrice && (
+                    <span className="block text-xs text-zinc-500">
+                      {rp.inStock === false
                         ? lang === "ar" ? "غير متوفر حاليًا" : "Currently out of stock"
-                        : lang === "ar" ? "متوفر" : "In stock"
-                      : lang === "ar"
-                        ? "السعر مش ظاهر أوتوماتيك (حماية من المتجر) — افتح الرابط"
-                        : "Price not shown automatically (store protection) — open the link"}
-                  </span>
+                        : lang === "ar" ? "متوفر" : "In stock"}
+                    </span>
+                  )}
                 </div>
               </div>
               {hasPrice ? (
                 <div className="text-end">
-                  <p className="font-bold text-zinc-100">{Math.round(rp.price as number).toLocaleString()} {rp.currency}</p>
+                  <p className="font-extrabold text-emerald-400">
+                    {Math.round(rp.price as number).toLocaleString()} {rp.currency}
+                  </p>
+                  <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-emerald-400/35 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-400">
+                    {lang === "ar" ? "انتقل للشراء" : "Go to buy"}
+                    <Arrow className="h-3 w-3" />
+                  </span>
                 </div>
               ) : (
-                <ExternalLink className="h-4 w-4 shrink-0 text-zinc-500" />
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold text-amber-400">
+                  {lang === "ar" ? "تحقق من السعر والخصم اللحظي" : "Check live price & discount"}
+                  <Arrow className="h-3.5 w-3.5" />
+                </span>
               )}
             </a>
           );
         })}
       </div>
 
-      <p className="mt-3.5 text-[11px] leading-relaxed text-zinc-500">
-        {lang === "ar"
-          ? "كل لينك بيوديك مباشرة لأول منتج فعلي لقيناه في نتائج البحث بالمتجر ده — مش صفحة بحث عامة. لو معرفناش نقرا السعر حيًا من صفحة المتجر، بنورّيك اللينك برضه من غير رقم بدل ما نخمّن. بعض الروابط شراكة تجارية، وده مش بيأثر على ترتيب أو تقييم 'قرار' للصفقة."
-          : "Each link takes you straight to the actual first product we found in that store's search results — not a generic search page. If we couldn't read a live price off the store's page, we still show the link without a number rather than guess. Some links are commercial partnerships; this doesn't affect Qarari's ranking or rating of the deal."}
-      </p>
+      <div className="mt-3.5 flex gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5">
+        <Lightbulb className="mt-0.5 h-[18px] w-[18px] shrink-0 text-amber-400" />
+        <div>
+          <p className="mb-1 text-[12.5px] font-bold text-amber-400">
+            {lang === "ar" ? "ليه مش بيظهر السعر أوتوماتيك لبعض المواقع؟" : "Why doesn't the price show automatically for some stores?"}
+          </p>
+          <p className="text-[11.5px] leading-relaxed text-zinc-400">
+            {lang === "ar"
+              ? 'حرصاً على الدقة 100%؛ تتغير أسعار مواقع مثل (أمازون ونون) لحظياً وتتأثر بكوبونات السلة وتعدد البائعين. توفير الرابط المباشر يضمن لك رؤية السعر الحقيقي والمخزون المتاح الآن بدون تضليل.'
+              : "For 100% accuracy: prices on stores like Amazon and Noon change in real time and can be affected by cart coupons and multiple sellers. Giving you the direct link guarantees you see the real, current price and stock without any misleading estimate."}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -549,6 +572,21 @@ export function ReportScreen() {
         <h2 className="mb-3 flex items-center gap-2 font-serif text-lg font-bold text-amber-400">
           <Info className="h-5 w-5" /> {t("finalVerdict")}
         </h2>
+
+        {/* One-glance verdict banner — added because the numbered reasoning
+            below can run long, and most people just want "buy or don't buy"
+            immediately, not to read all 4 points first. Anyone who does want
+            the detail still has it right underneath. Driven by the
+            structured report.verdict field (not text-matched against the
+            AI's freeform reasoning, which would be fragile) — same color
+            system already used for the top verdict badge (`vc`), so it
+            reads as one consistent signal across the report. */}
+        <div className={`mb-4 rounded-lg border ${vc.border} ${vc.bg} px-4 py-3`}>
+          <p className={`text-center text-base font-extrabold ${vc.color}`}>
+            {t(report.verdict === "good" ? "verdictActionGood" : report.verdict === "bad" ? "verdictActionBad" : "verdictActionFair")}
+          </p>
+        </div>
+
         <ol className={`space-y-2 ${dir === "rtl" ? "pr-5" : "pl-5"}`}>
           {bilingualArr(report.reasoningPoints).map((point, i) => (
             <li key={i} className="text-sm text-zinc-300">
@@ -563,12 +601,14 @@ export function ReportScreen() {
         )}
       </div>
 
-      {/* Before You Buy */}
-      <div className={`mb-4 rounded-xl border ${report.verdict === "bad" ? "border-red-500/30 bg-red-500/5" : "border-amber-500/30 bg-amber-500/5"} p-4`}>
+      {/* Before You Buy — colored to match the verdict everywhere else on
+          the report (vc), not just a red/amber toggle, so a "good" verdict
+          doesn't show the same cautionary amber as a "fair" one. */}
+      <div className={`mb-4 rounded-xl border ${vc.border} ${vc.bg} p-4`}>
         <div className="flex items-start gap-2">
-          <AlertTriangle className={`h-5 w-5 shrink-0 ${report.verdict === "bad" ? "text-red-400" : "text-amber-400"}`} />
+          <AlertTriangle className={`h-5 w-5 shrink-0 ${vc.color}`} />
           <div>
-            <p className={`text-sm font-bold ${report.verdict === "bad" ? "text-red-400" : "text-amber-400"}`}>{t("beforeYouBuy")}</p>
+            <p className={`text-sm font-bold ${vc.color}`}>{t("beforeYouBuy")}</p>
             <p className="mt-1 text-sm text-zinc-300">
               {bilingual(report.preRecommendation) ||
                 (lang === "ar"

@@ -87,13 +87,22 @@ export function SelectContent({
   children: React.ReactNode
 }) {
   const { open } = useSelectContext()
-  if (!open) return null
+  // Always mounted (never `return null`) — SelectItem below syncs the
+  // trigger's displayed label via a mount-time effect that compares its own
+  // value against the currently selected value. If this returns null while
+  // closed, that effect never runs until the user opens the dropdown at
+  // least once, so a value set programmatically (e.g. the default currency)
+  // shows as a blank trigger with no visible label until first opened —
+  // exactly the bug reported for the currency selector. Hidden via
+  // `display:none` instead so it's invisible and non-interactive while
+  // closed, but still mounted.
   return (
     <div
       className={cn(
         // Explicit dark-but-distinct panel background + light text so options
         // are always legible (never dark-on-dark) — matches spec Section 5/4.
         "absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-zinc-700 bg-zinc-800 py-1 text-zinc-100 shadow-xl shadow-black/50",
+        !open && "hidden",
         className
       )}
     >
