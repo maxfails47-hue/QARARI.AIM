@@ -1,1 +1,0 @@
-export { InputScreen as DecisionInput } from "@/components/InputScreen";
